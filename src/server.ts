@@ -1,0 +1,133 @@
+import express, { Request, Response } from "express";
+import { PieceStore } from "./store";
+import { RagPipeline } from "./rag";
+import { PieceStoreConfig, DEFAULT_CONFIG } from "./types";
+
+export function createServer(config: PieceStoreConfig = {}) {
+    const resolvedConfig = { ...DEFAULT_CONFIG, ...config };
+    const app = express();
+    app.use(express.json());
+
+    const store = new PieceStore(resolvedConfig);
+    const rag = new RagPipeline(
+        store,
+        resolvedConfig.ollamaUrl,
+        resolvedConfig.generationModel,
+    );
+
+    // Middleware to ensure store is initialized
+    let initialized = false;
+    app.use(async (_req, res, next) => {
+        if (!initialized) {
+            try {
+                await store.init();
+                initialized = true;
+            } catch (err) {
+                res.status(503).json({
+                    error: "Failed to connect to ChromaDB",
+                    details: String(err),
+                });
+                return;
+            }
+        }
+        next();
+    });
+
+    // POST /pieces — Add a piece
+    app.post("/pieces", async (req: Request, res: Response) => {
+        try {
+            const { content, tags } = req.body;
+            if (!content || typeof content !== "string") {
+                res.status(400).json({ error: "content (string) is required" });
+                return;
+            }
+            const piece = await store.addPiece(content, tags ?? []);
+            res.status(201).json(piece);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // GET /pieces/:id — Get a piece by ID
+    app.get("/pieces/:id", async (req: Request, res: Response) => {
+        try {
+            const id = req.params.id as string;
+            const piece = await store.getPiece(id);
+            if (!piece) {
+                res.status(404).json({ error: "Piece not found" });
+                return;
+            }
+            res.json(piece);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // PUT /pieces/:id — Update a piece
+    app.put("/pieces/:id", async (req: Request, res: Response) => {
+        try {
+            const id = req.params.id as string;
+            const { content, tags } = req.body;
+            const piece = await store.updatePiece(id, content, tags);
+            if (!piece) {
+                res.status(404).json({ error: "Piece not found" });
+                return;
+            }
+            res.json(piece);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // DELETE /pieces/:id — Delete a piece
+    app.delete("/pieces/:id", async (req: Request, res: Response) => {
+        try {
+            const id = req.params.id as string;
+            await store.deletePiece(id);
+            res.status(204).send();
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // POST /query — Semantic search
+    app.post("/query", async (req: Request, res: Response) => {
+        try {
+            const { query, tags, topK } = req.body;
+            if (!query || typeof query !== "string") {
+                res.status(400).json({ error: "query (string) is required" });
+                return;
+            }
+            const results = await store.queryPieces(query, { tags, topK });
+            res.json(results);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // POST /rag — Full RAG query
+    app.post("/rag", async (req: Request, res: Response) => {
+        try {
+            const { query, tags, topK } = req.body;
+            if (!query || typeof query !== "string") {
+                res.status(400).json({ error: "query (string) is required" });
+                return;
+            }
+            const result = await rag.query(query, { tags, topK });
+            res.json(result);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    return app;
+}
+
+// Run server if executed directly
+if (require.main === module) {
+    const PORT = process.env.PORT ?? 3000;
+    const app = createServer();
+    app.listen(PORT, () => {
+        console.log(`Memory RAG server running on http://localhost:${PORT}`);
+    });
+}
