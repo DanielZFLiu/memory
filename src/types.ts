@@ -4,7 +4,7 @@ export interface Piece {
     tags: string[];
 }
 
-export interface PieceStoreConfig {
+export interface MemoryConfig {
     chromaUrl?: string;
     ollamaUrl?: string;
     embeddingModel?: string;
@@ -12,7 +12,7 @@ export interface PieceStoreConfig {
     collectionName?: string;
 }
 
-export const DEFAULT_CONFIG: Required<PieceStoreConfig> = {
+export const DEFAULT_MEMORY_CONFIG: Required<MemoryConfig> = {
     chromaUrl: "http://localhost:8000",
     ollamaUrl: "http://localhost:11434",
     embeddingModel: "nomic-embed-text-v2-moe",

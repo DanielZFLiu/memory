@@ -4,7 +4,7 @@ A Node.js library and REST API for storing, searching, and querying tagged text 
 
 ## Prerequisites
 
-- **Node.js** ≥ 20
+- **Node.js** ≥ 18
 - **Ollama** running locally ([install](https://ollama.com))
 - **ChromaDB** server running locally
 
@@ -107,13 +107,15 @@ Returns:
 ### Programmatic Usage (Library)
 
 ```typescript
-import { PieceStore, RagPipeline } from "memory";
+import { PieceStore, RagPipeline, MemoryConfig } from "memory";
 
-const store = new PieceStore({
+const config: MemoryConfig = {
   chromaUrl: "http://localhost:8000",
   ollamaUrl: "http://localhost:11434",
   embeddingModel: "nomic-embed-text-v2-moe",
-});
+};
+
+const store = new PieceStore(config);
 await store.init();
 
 // Add pieces
@@ -135,7 +137,7 @@ const answer = await rag.query("What is TypeScript?", { tags: ["programming"] })
 console.log(answer.answer);
 ```
 
-## Configuration
+## Configuration (`MemoryConfig`)
 
 All config options have sensible defaults:
 
@@ -147,14 +149,25 @@ All config options have sensible defaults:
 | `generationModel` | `llama3.2` | Ollama model for RAG generation |
 | `collectionName` | `pieces` | ChromaDB collection name |
 
+## Testing
+
+```bash
+npm test              # run all tests
+npm run test:watch    # watch mode
+npm run test:coverage # with coverage report
+```
+
 ## Project Structure
 
 ```
 src/
-├── types.ts        # Interfaces and config defaults
+├── types.ts        # Interfaces (MemoryConfig, Piece, QueryResult, etc.)
 ├── embeddings.ts   # Ollama embedding client
 ├── store.ts        # PieceStore — CRUD + semantic search + tag filtering
 ├── rag.ts          # RAG pipeline — retrieve → prompt → generate
 ├── server.ts       # Express REST API
 └── index.ts        # Library entry point
+tests/
+├── unit/           # Unit tests (embeddings, store, rag)
+└── integration/    # API integration tests (supertest)
 ```

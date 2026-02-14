@@ -3,9 +3,9 @@ import { PieceStore } from "./store";
 import { QueryOptions, RagResult } from "./types";
 
 export class RagPipeline {
-    private store: PieceStore;
-    private ollama: Ollama;
-    private model: string;
+    private readonly store: PieceStore;
+    private readonly ollama: Ollama;
+    private readonly model: string;
 
     constructor(store: PieceStore, ollamaUrl: string, model: string) {
         this.store = store;
@@ -15,6 +15,15 @@ export class RagPipeline {
 
     async query(query: string, options: QueryOptions = {}): Promise<RagResult> {
         const sources = await this.store.queryPieces(query, options);
+
+        if (sources.length === 0) {
+            return {
+                answer:
+                    "I don't have enough context to answer this question. " +
+                    "No relevant pieces were found in the knowledge base.",
+                sources: [],
+            };
+        }
 
         const contextBlock = sources
             .map(

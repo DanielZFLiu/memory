@@ -3,28 +3,20 @@ import { v4 as uuidv4 } from "uuid";
 import { EmbeddingClient } from "./embeddings";
 import {
     Piece,
-    PieceStoreConfig,
-    DEFAULT_CONFIG,
+    MemoryConfig,
+    DEFAULT_MEMORY_CONFIG,
     QueryOptions,
     QueryResult,
 } from "./types";
 
-export function encodeTags(tags: string[]): string {
-    return "," + tags.join(",") + ",";
-}
-
-export function decodeTags(encoded: string): string[] {
-    return encoded.slice(1, -1).split(",").filter(Boolean);
-}
-
 export class PieceStore {
-    private chromaClient: ChromaClient;
-    private embeddingClient: EmbeddingClient;
+    private readonly chromaClient: ChromaClient;
+    private readonly embeddingClient: EmbeddingClient;
     private collection: Collection | null = null;
-    private config: Required<PieceStoreConfig>;
+    private readonly config: Required<MemoryConfig>;
 
-    constructor(config: PieceStoreConfig = {}) {
-        this.config = { ...DEFAULT_CONFIG, ...config };
+    constructor(config: MemoryConfig = {}) {
+        this.config = { ...DEFAULT_MEMORY_CONFIG, ...config };
         this.chromaClient = new ChromaClient({ path: this.config.chromaUrl });
         this.embeddingClient = new EmbeddingClient(
             this.config.ollamaUrl,
@@ -55,7 +47,7 @@ export class PieceStore {
             ids: [id],
             embeddings: [embedding],
             documents: [content],
-            metadatas: [{ tags: encodeTags(tags) }],
+            metadatas: [{ tags: tags } as Record<string, unknown> as Record<string, string | number | boolean>],
         });
 
         return { id, content, tags };
@@ -73,7 +65,7 @@ export class PieceStore {
         return {
             id: result.ids[0],
             content: result.documents[0] ?? "",
-            tags: decodeTags((result.metadatas[0]?.tags as string) ?? ""),
+            tags: (result.metadatas[0]?.tags as unknown as string[]) ?? [],
         };
     }
 
@@ -98,10 +90,10 @@ export class PieceStore {
             ids: string[];
             documents?: string[];
             embeddings?: number[][];
-            metadatas?: Record<string, string>[];
+            metadatas?: Record<string, string | number | boolean>[];
         } = {
             ids: [id],
-            metadatas: [{ tags: encodeTags(newTags) }],
+            metadatas: [{ tags: newTags } as Record<string, unknown> as Record<string, string | number | boolean>],
         };
 
         if (content !== undefined) {
@@ -128,11 +120,11 @@ export class PieceStore {
         let whereClause: Record<string, unknown> | undefined;
         if (tags && tags.length > 0) {
             if (tags.length === 1) {
-                whereClause = { tags: { $contains: `,${tags[0]},` } };
+                whereClause = { tags: { $contains: tags[0] } };
             } else {
                 whereClause = {
                     $and: tags.map((tag) => ({
-                        tags: { $contains: `,${tag},` },
+                        tags: { $contains: tag },
                     })),
                 };
             }
@@ -160,7 +152,7 @@ export class PieceStore {
                 piece: {
                     id: ids[i],
                     content: documents[i] ?? "",
-                    tags: decodeTags((metadatas[i]?.tags as string) ?? ""),
+                    tags: (metadatas[i]?.tags as unknown as string[]) ?? [],
                 },
                 score: 1 - (distances[i] ?? 0), // cosine distance → similarity
             });

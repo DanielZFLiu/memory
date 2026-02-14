@@ -1,8 +1,8 @@
 import { Ollama } from "ollama";
 
 export class EmbeddingClient {
-    private client: Ollama;
-    private model: string;
+    private readonly client: Ollama;
+    private readonly model: string;
 
     constructor(ollamaUrl: string, model: string) {
         this.client = new Ollama({ host: ollamaUrl });

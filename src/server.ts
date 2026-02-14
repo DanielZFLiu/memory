@@ -1,10 +1,10 @@
 import express, { Request, Response } from "express";
 import { PieceStore } from "./store";
 import { RagPipeline } from "./rag";
-import { PieceStoreConfig, DEFAULT_CONFIG } from "./types";
+import { MemoryConfig, DEFAULT_MEMORY_CONFIG } from "./types";
 
-export function createServer(config: PieceStoreConfig = {}) {
-    const resolvedConfig = { ...DEFAULT_CONFIG, ...config };
+export function createServer(config: MemoryConfig = {}) {
+    const resolvedConfig = { ...DEFAULT_MEMORY_CONFIG, ...config };
     const app = express();
     app.use(express.json());
 
@@ -49,9 +49,9 @@ export function createServer(config: PieceStoreConfig = {}) {
     });
 
     // GET /pieces/:id — Get a piece by ID
-    app.get("/pieces/:id", async (req: Request, res: Response) => {
+    app.get("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
-            const id = req.params.id as string;
+            const { id } = req.params;
             const piece = await store.getPiece(id);
             if (!piece) {
                 res.status(404).json({ error: "Piece not found" });
@@ -64,9 +64,9 @@ export function createServer(config: PieceStoreConfig = {}) {
     });
 
     // PUT /pieces/:id — Update a piece
-    app.put("/pieces/:id", async (req: Request, res: Response) => {
+    app.put("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
-            const id = req.params.id as string;
+            const { id } = req.params;
             const { content, tags } = req.body;
             const piece = await store.updatePiece(id, content, tags);
             if (!piece) {
@@ -80,9 +80,9 @@ export function createServer(config: PieceStoreConfig = {}) {
     });
 
     // DELETE /pieces/:id — Delete a piece
-    app.delete("/pieces/:id", async (req: Request, res: Response) => {
+    app.delete("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
-            const id = req.params.id as string;
+            const { id } = req.params;
             await store.deletePiece(id);
             res.status(204).send();
         } catch (err) {

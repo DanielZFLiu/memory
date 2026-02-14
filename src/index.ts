@@ -4,8 +4,8 @@ export { EmbeddingClient } from "./embeddings";
 export { createServer } from "./server";
 export {
     Piece,
-    PieceStoreConfig,
-    DEFAULT_CONFIG,
+    MemoryConfig,
+    DEFAULT_MEMORY_CONFIG,
     QueryOptions,
     QueryResult,
     RagResult,
