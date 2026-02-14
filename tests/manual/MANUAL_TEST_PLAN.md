@@ -20,7 +20,7 @@
 > **These guidelines prevent an AI agent from hanging on interactive prompts or blocking commands.**
 
 - **Non-blocking server commands:** `npm run dev` starts a long-running server that never exits. Run it as a **background/non-blocking** command. Do NOT wait for it to complete — it won't. After launching, wait 3–5 seconds, then verify the server is up by hitting an endpoint.
-- **npm install:** Run `npm install --no-optional` to avoid optional dependency prompts. If you have a `package-lock.json` present, `npm ci` is faster and fully non-interactive. These commands DO terminate and can be run blocking.
+- **npm install:** Run `npm install` (do **not** use `--no-optional` — esbuild requires its platform-specific optional dependency). If you have a `package-lock.json` present, `npm ci` is faster and fully non-interactive. These commands DO terminate and can be run blocking.
 - **Avoid interactive prompts:** Never pipe into a command that might request confirmation. If a command could prompt (e.g., `ollama pull`), ensure the model is already available before running the test plan.
 - **Timeouts:** Set reasonable timeouts on HTTP requests. RAG queries (§6) may take 10–60 seconds. Use `Invoke-RestMethod -TimeoutSec 120` if needed.
 - **Stopping the server (§8):** Use `Stop-Process` to kill the Node.js process (see §8 for details). Do NOT send Ctrl+C interactively — an AI agent cannot do this reliably.

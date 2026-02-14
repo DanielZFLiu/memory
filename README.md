@@ -28,6 +28,11 @@ pip install chromadb
 chroma run --port 8000
 ```
 
+**Windows note:** If `chroma` is not recognized, the `Scripts` directory may not be on your PATH. Either add it (e.g. `%APPDATA%\Python\Python3xx\Scripts`) or run the executable directly:
+```powershell
+& "$env:APPDATA\Python\Python313\Scripts\chroma.exe" run --port 8000
+```
+
 ## Install
 
 ```bash
