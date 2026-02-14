@@ -13,8 +13,13 @@
     "files": [
         "dist",
         "README.md",
-        "LICENSE"
+        "LICENSE",
+        "package_scripts"
     ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/DanielZFLiu/memory.git"
+    },
     "engines": {
         "node": ">=18"
     },
