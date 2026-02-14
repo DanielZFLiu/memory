@@ -1,3 +1,5 @@
+[![npm version](https://img.shields.io/npm/v/@danielzfliu/memory.svg)](https://www.npmjs.com/package/@danielzfliu/memory)
+
 # Memory
 A fully local Node.js library and REST API for storing, searching, and querying tagged text pieces using ChromaDB for vector storage and Ollama for embeddings + generation.
 
