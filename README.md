@@ -192,5 +192,6 @@ src/
 tests/
 ├── helpers/        # Shared test fixtures (in-memory ChromaDB mock, etc.)
 ├── unit/           # Unit tests (embeddings, store, rag)
+├── manual/         # Manual api tests (used by ai agents with access to terminal)
 └── integration/    # API integration tests (supertest)
 ```
