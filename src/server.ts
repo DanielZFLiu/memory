@@ -15,20 +15,22 @@ export function createServer(config: MemoryConfig = {}) {
         resolvedConfig.generationModel,
     );
 
-    // Middleware to ensure store is initialized
-    let initialized = false;
+    // Middleware to ensure store is initialized (uses a cached promise to
+    // avoid duplicate init() calls when concurrent requests arrive early)
+    let initPromise: Promise<void> | null = null;
     app.use(async (_req, res, next) => {
-        if (!initialized) {
-            try {
-                await store.init();
-                initialized = true;
-            } catch (err) {
-                res.status(503).json({
-                    error: "Failed to connect to ChromaDB",
-                    details: String(err),
-                });
-                return;
-            }
+        if (!initPromise) {
+            initPromise = store.init();
+        }
+        try {
+            await initPromise;
+        } catch (err) {
+            initPromise = null; // allow retry on next request
+            res.status(503).json({
+                error: "Failed to connect to ChromaDB",
+                details: String(err),
+            });
+            return;
         }
         next();
     });
@@ -121,13 +123,4 @@ export function createServer(config: MemoryConfig = {}) {
     });
 
     return app;
-}
-
-// Run server if executed directly
-if (require.main === module) {
-    const PORT = process.env.PORT ?? 3000;
-    const app = createServer();
-    app.listen(PORT, () => {
-        console.log(`Memory RAG server running on http://localhost:${PORT}`);
-    });
 }

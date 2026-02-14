@@ -9,6 +9,16 @@ import {
     QueryResult,
 } from "./types";
 
+type ChromaMetadata = Record<string, string | number | boolean>;
+
+function toChromaMetadata(tags: string[]): ChromaMetadata {
+    return { tags } as unknown as ChromaMetadata;
+}
+
+function parseTags(metadata: Record<string, unknown> | null | undefined): string[] {
+    return (metadata?.tags as unknown as string[]) ?? [];
+}
+
 export class PieceStore {
     private readonly chromaClient: ChromaClient;
     private readonly embeddingClient: EmbeddingClient;
@@ -47,7 +57,7 @@ export class PieceStore {
             ids: [id],
             embeddings: [embedding],
             documents: [content],
-            metadatas: [{ tags: tags } as Record<string, unknown> as Record<string, string | number | boolean>],
+            metadatas: [toChromaMetadata(tags)],
         });
 
         return { id, content, tags };
@@ -65,7 +75,7 @@ export class PieceStore {
         return {
             id: result.ids[0],
             content: result.documents[0] ?? "",
-            tags: (result.metadatas[0]?.tags as unknown as string[]) ?? [],
+            tags: parseTags(result.metadatas[0]),
         };
     }
 
@@ -90,10 +100,10 @@ export class PieceStore {
             ids: string[];
             documents?: string[];
             embeddings?: number[][];
-            metadatas?: Record<string, string | number | boolean>[];
+            metadatas?: ChromaMetadata[];
         } = {
             ids: [id],
-            metadatas: [{ tags: newTags } as Record<string, unknown> as Record<string, string | number | boolean>],
+            metadatas: [toChromaMetadata(newTags)],
         };
 
         if (content !== undefined) {
@@ -152,7 +162,7 @@ export class PieceStore {
                 piece: {
                     id: ids[i],
                     content: documents[i] ?? "",
-                    tags: (metadatas[i]?.tags as unknown as string[]) ?? [],
+                    tags: parseTags(metadatas[i]),
                 },
                 score: 1 - (distances[i] ?? 0), // cosine distance → similarity
             });

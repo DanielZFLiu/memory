@@ -170,9 +170,11 @@ src/
 ├── embeddings.ts   # Ollama embedding client
 ├── store.ts        # PieceStore — CRUD + semantic search + tag filtering
 ├── rag.ts          # RAG pipeline — retrieve → prompt → generate
-├── server.ts       # Express REST API
-└── index.ts        # Library entry point
+├── server.ts       # Express REST API (app factory)
+├── main.ts         # Server entry point (starts listening)
+└── index.ts        # Library entry point (public exports)
 tests/
+├── helpers/        # Shared test fixtures (in-memory ChromaDB mock, etc.)
 ├── unit/           # Unit tests (embeddings, store, rag)
 └── integration/    # API integration tests (supertest)
 ```
