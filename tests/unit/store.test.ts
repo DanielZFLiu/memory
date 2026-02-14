@@ -59,12 +59,38 @@ describe("PieceStore", () => {
         await store.init();
     });
 
+    describe("constructor", () => {
+        it("applies default config when no options provided", () => {
+            const defaultStore = new PieceStore();
+            // Should not throw — defaults are applied internally
+            expect(defaultStore).toBeInstanceOf(PieceStore);
+        });
+
+        it("merges partial config with defaults", () => {
+            const partialStore = new PieceStore({
+                collectionName: "custom",
+            });
+            expect(partialStore).toBeInstanceOf(PieceStore);
+        });
+    });
+
     describe("init", () => {
         it("creates or gets the collection with cosine distance", async () => {
             expect(mockGetOrCreateCollection).toHaveBeenCalledWith({
                 name: "test-pieces",
                 metadata: { "hnsw:space": "cosine" },
             });
+        });
+
+        it("propagates errors from ChromaDB", async () => {
+            mockGetOrCreateCollection.mockRejectedValueOnce(
+                new Error("ChromaDB unreachable"),
+            );
+            const freshStore = new PieceStore();
+
+            await expect(freshStore.init()).rejects.toThrow(
+                "ChromaDB unreachable",
+            );
         });
     });
 
@@ -104,6 +130,31 @@ describe("PieceStore", () => {
                 }),
             );
         });
+
+        it("generates a unique UUID for each piece", async () => {
+            mockAdd.mockResolvedValueOnce(undefined);
+
+            const piece = await store.addPiece("content", ["tag"]);
+
+            expect(piece.id).toBe("test-uuid-1234");
+        });
+
+        it("propagates embedding errors", async () => {
+            mockEmbed.mockRejectedValueOnce(new Error("Ollama down"));
+
+            await expect(
+                store.addPiece("will fail", ["tag"]),
+            ).rejects.toThrow("Ollama down");
+            expect(mockAdd).not.toHaveBeenCalled();
+        });
+
+        it("propagates ChromaDB add errors", async () => {
+            mockAdd.mockRejectedValueOnce(new Error("Collection full"));
+
+            await expect(
+                store.addPiece("will fail", ["tag"]),
+            ).rejects.toThrow("Collection full");
+        });
     });
 
     describe("getPiece", () => {
@@ -120,6 +171,21 @@ describe("PieceStore", () => {
                 id: "id-1",
                 content: "Some content",
                 tags: ["python", "rag"],
+            });
+        });
+
+        it("passes correct include parameters", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["content"],
+                metadatas: [{ tags: [] }],
+            });
+
+            await store.getPiece("id-1");
+
+            expect(mockGet).toHaveBeenCalledWith({
+                ids: ["id-1"],
+                include: ["documents", "metadatas"],
             });
         });
 
@@ -144,6 +210,23 @@ describe("PieceStore", () => {
             const piece = await store.getPiece("id-1");
             expect(piece?.content).toBe("");
         });
+
+        it("handles null metadata gracefully", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["content"],
+                metadatas: [null],
+            });
+
+            const piece = await store.getPiece("id-1");
+            expect(piece?.tags).toEqual([]);
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockGet.mockRejectedValueOnce(new Error("DB error"));
+
+            await expect(store.getPiece("id-1")).rejects.toThrow("DB error");
+        });
     });
 
     describe("deletePiece", () => {
@@ -153,6 +236,14 @@ describe("PieceStore", () => {
             await store.deletePiece("id-to-delete");
 
             expect(mockDelete).toHaveBeenCalledWith({ ids: ["id-to-delete"] });
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockDelete.mockRejectedValueOnce(new Error("Delete failed"));
+
+            await expect(store.deletePiece("id-1")).rejects.toThrow(
+                "Delete failed",
+            );
         });
     });
 
@@ -191,7 +282,6 @@ describe("PieceStore", () => {
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
-            // Only call with id and tags, content is undefined
             const result = await store.updatePiece("id-1", undefined, [
                 "newtag",
             ]);
@@ -201,11 +291,36 @@ describe("PieceStore", () => {
                 content: "Existing content",
                 tags: ["newtag"],
             });
-            // embed should only be called once during init/setup, not for this update
+            expect(mockEmbed).not.toHaveBeenCalled();
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
                 metadatas: [expect.objectContaining({ tags: ["newtag"] })],
             });
+        });
+
+        it("updates only content and preserves existing tags", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Old content"],
+                metadatas: [{ tags: ["keep-me"] }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            const result = await store.updatePiece("id-1", "New content");
+
+            expect(result).toEqual({
+                id: "id-1",
+                content: "New content",
+                tags: ["keep-me"],
+            });
+            expect(mockEmbed).toHaveBeenCalledWith("New content");
+            expect(mockUpdate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    documents: ["New content"],
+                    embeddings: [[0.1, 0.2, 0.3]],
+                    metadatas: [expect.objectContaining({ tags: ["keep-me"] })],
+                }),
+            );
         });
 
         it("returns null if piece does not exist", async () => {
@@ -217,6 +332,34 @@ describe("PieceStore", () => {
 
             const result = await store.updatePiece("nonexistent", "content");
             expect(result).toBeNull();
+            expect(mockUpdate).not.toHaveBeenCalled();
+        });
+
+        it("propagates embedding errors during content update", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Old"],
+                metadatas: [{ tags: [] }],
+            });
+            mockEmbed.mockRejectedValueOnce(new Error("Embed failed"));
+
+            await expect(
+                store.updatePiece("id-1", "New content"),
+            ).rejects.toThrow("Embed failed");
+            expect(mockUpdate).not.toHaveBeenCalled();
+        });
+
+        it("propagates ChromaDB update errors", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Old"],
+                metadatas: [{ tags: [] }],
+            });
+            mockUpdate.mockRejectedValueOnce(new Error("Update failed"));
+
+            await expect(
+                store.updatePiece("id-1", undefined, ["tag"]),
+            ).rejects.toThrow("Update failed");
         });
     });
 
@@ -240,6 +383,36 @@ describe("PieceStore", () => {
                 piece: { id: "id-2", content: "Doc two", tags: ["b"] },
                 score: 0.5, // 1 - 0.5
             });
+        });
+
+        it("embeds the query text for vector search", async () => {
+            mockQuery.mockResolvedValueOnce({
+                ids: [[]],
+                documents: [[]],
+                metadatas: [[]],
+                distances: [[]],
+            });
+
+            await store.queryPieces("my search query");
+
+            expect(mockEmbed).toHaveBeenCalledWith("my search query");
+        });
+
+        it("passes correct include parameters", async () => {
+            mockQuery.mockResolvedValueOnce({
+                ids: [[]],
+                documents: [[]],
+                metadatas: [[]],
+                distances: [[]],
+            });
+
+            await store.queryPieces("test");
+
+            expect(mockQuery).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    include: ["documents", "metadatas", "distances"],
+                }),
+            );
         });
 
         it("passes topK to nResults", async () => {
@@ -325,14 +498,102 @@ describe("PieceStore", () => {
                 expect.objectContaining({ nResults: 10 }),
             );
         });
+
+        it("returns empty array when no results", async () => {
+            mockQuery.mockResolvedValueOnce({
+                ids: [[]],
+                documents: [[]],
+                metadatas: [[]],
+                distances: [[]],
+            });
+
+            const results = await store.queryPieces("nothing here");
+
+            expect(results).toEqual([]);
+        });
+
+        it("handles null documents in results gracefully", async () => {
+            mockQuery.mockResolvedValueOnce({
+                ids: [["id-1"]],
+                documents: [[null]],
+                metadatas: [[{ tags: ["a"] }]],
+                distances: [[0.1]],
+            });
+
+            const results = await store.queryPieces("test");
+
+            expect(results[0].piece.content).toBe("");
+        });
+
+        it("handles missing distances gracefully", async () => {
+            mockQuery.mockResolvedValueOnce({
+                ids: [["id-1"]],
+                documents: [["Doc"]],
+                metadatas: [[{ tags: [] }]],
+                distances: undefined,
+            });
+
+            const results = await store.queryPieces("test");
+
+            expect(results[0].score).toBe(1); // 1 - 0 (default)
+        });
+
+        it("propagates embedding errors", async () => {
+            mockEmbed.mockRejectedValueOnce(new Error("Embed failed"));
+
+            await expect(store.queryPieces("test")).rejects.toThrow(
+                "Embed failed",
+            );
+            expect(mockQuery).not.toHaveBeenCalled();
+        });
+
+        it("propagates ChromaDB query errors", async () => {
+            mockQuery.mockRejectedValueOnce(new Error("Query failed"));
+
+            await expect(store.queryPieces("test")).rejects.toThrow(
+                "Query failed",
+            );
+        });
     });
 
-    describe("error handling", () => {
-        it("throws when calling methods before init", async () => {
+    describe("uninitialized guard", () => {
+        it("throws when calling addPiece before init", async () => {
             const uninitializedStore = new PieceStore();
 
             await expect(
                 uninitializedStore.addPiece("test", []),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling getPiece before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.getPiece("id"),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling deletePiece before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.deletePiece("id"),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling updatePiece before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.updatePiece("id", "content"),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling queryPieces before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.queryPieces("query"),
             ).rejects.toThrow("PieceStore not initialized. Call init() first.");
         });
     });
