@@ -1,54 +1,57 @@
 [![npm version](https://img.shields.io/npm/v/@danielzfliu/memory.svg)](https://www.npmjs.com/package/@danielzfliu/memory)
 
 # Memory
+
 A fully local Node.js library and REST API for storing, searching, and querying tagged text pieces using ChromaDB for vector storage and Ollama for embeddings + generation.
+
+Two ways to use Memory:
+
+- REST API Server — Clone the repo and run a standalone HTTP server with CRUD, semantic search, and RAG endpoints.
+- npm Package — Install `@danielzfliu/memory` in your own project and use the classes directly, or embed the Express server in your app.
+
+---
 
 ## Prerequisites
 
-- **Node.js** ≥ 18
-- **Ollama** running locally ([install](https://ollama.com))
-- **ChromaDB** server running locally
+- Node.js ≥ 18
+- Ollama running locally ([install](https://ollama.com))
+- ChromaDB server running locally
 
-### Start Ollama & pull models
-To pull models, run:
+Pull the required models:
 ```bash
 ollama pull nomic-embed-text-v2-moe
 ollama pull llama3.2
 ```
 
-If used as api:
+---
+
+## Option A: REST API Server
+
+Use this option to run Memory as a standalone HTTP service.
+
+### 1. Setup
+
 ```bash
-npm run ollama # or
-npm run ollama:port 11435
-```
-
-If used as a npm package:
-```bash
-ollama serve
-```
-
-### Start ChromaDB
-If used as api:
-```bash
-npm run db # or
-npm run db:port 9000
-```
-
-If used as a npm package:
-```bash
-chroma run --port 8000
-```
-
-**Windows note:** If `chroma` is not recognized, the `Scripts` directory may not be on your PATH. Either add it (e.g. `%APPDATA%\Python\Python3xx\Scripts`) or run the executable directly:
-```powershell
-& "$env:APPDATA\Python\Python313\Scripts\chroma.exe" run --port 8000
-```
-
-## Usage
-
-### REST API Server
-```bash
+git clone https://github.com/DanielZFLiu/memory.git
+cd memory
 npm install
+```
+
+### 2. Start external services
+
+The repo includes convenience scripts for starting Ollama and ChromaDB:
+
+```bash
+npm run ollama                     # start Ollama on default port 11434
+npm run ollama:port -- 11435       # start Ollama on a custom port
+
+npm run db                         # start ChromaDB on default port 8000
+npm run db:port -- 9000            # start ChromaDB on a custom port
+```
+
+### 3. Start the server
+
+```bash
 npm run dev
 ```
 
@@ -114,7 +117,35 @@ Returns:
 }
 ```
 
-### Programmatic Usage (Library)
+---
+
+## Option B: npm Package
+
+Use this option to integrate Memory into your own Node.js/TypeScript project.
+
+### 1. Install
+
+```bash
+npm install @danielzfliu/memory
+```
+
+### 2. Start external services
+
+You are responsible for running Ollama and ChromaDB yourself:
+
+```bash
+ollama serve                       # default port 11434
+chroma run --port 8000             # default port 8000
+```
+
+**Windows note:** If `chroma` is not recognized, the `Scripts` directory may not be on your PATH. Either add it (e.g. `%APPDATA%\Python\Python3xx\Scripts`) or run the executable directly:
+```powershell
+& "$env:APPDATA\Python\Python313\Scripts\chroma.exe" run --port 8000
+```
+
+### 3. Programmatic usage
+
+#### Using PieceStore and RagPipeline directly
 
 ```typescript
 import { PieceStore, RagPipeline, MemoryConfig } from "@danielzfliu/memory";
@@ -126,6 +157,7 @@ async function main() {
         embeddingModel: "nomic-embed-text-v2-moe",
     };
 
+    // Store: CRUD + semantic search
     const store = new PieceStore(config);
     await store.init();
 
@@ -147,7 +179,8 @@ async function main() {
     });
     console.log("filtered", filtered);
 
-    const rag = new RagPipeline(store, "http://localhost:11434", "llama3.2");
+    // RAG: retrieve relevant pieces → generate an answer via Ollama
+    const rag = new RagPipeline(store, config.ollamaUrl!, "llama3.2");
     const answer = await rag.query("What is TypeScript?", {
         tags: ["programming"],
     });
@@ -160,15 +193,51 @@ main().catch((err) => {
 });
 ```
 
+#### Embedding the REST API in your own Express app
+
+`createServer` returns a configured Express app you can mount or extend:
+
+```typescript
+import { createServer } from "@danielzfliu/memory";
+
+const app = createServer({
+    chromaUrl: "http://localhost:8000",
+    ollamaUrl: "http://localhost:11434",
+});
+
+app.listen(4000, () => console.log("Running on :4000"));
+```
+
+### Exports
+
+| Export | Description |
+|--------|-------------|
+| `PieceStore` | CRUD + semantic search over tagged text pieces |
+| `RagPipeline` | Retrieve-then-generate pipeline using `PieceStore` + Ollama |
+| `EmbeddingClient` | Low-level Ollama embedding wrapper |
+| `createServer` | Express app factory with all REST endpoints pre-configured |
+| `MemoryConfig` | Configuration interface (all fields optional with defaults) |
+| `DEFAULT_MEMORY_CONFIG` | The default values for `MemoryConfig` |
+| `Piece` | `{ id, content, tags }` |
+| `QueryOptions` | `{ tags?, topK? }` |
+| `QueryResult` | `{ piece, score }` |
+| `RagResult` | `{ answer, sources }` |
+
+---
+
 ## Configuration (`MemoryConfig`)
+
+All fields are optional. Defaults are applied automatically.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `chromaUrl` | `http://localhost:8000` | ChromaDB server URL |
 | `ollamaUrl` | `http://localhost:11434` | Ollama server URL |
 | `embeddingModel` | `nomic-embed-text-v2-moe` | Ollama model for embeddings |
-| `generationModel` | `llama3.2` | Ollama model for RAG generation |
+| `generationModel` | `llama3.2` | Ollama model for RAG generation (used by `createServer`) |
 | `collectionName` | `pieces` | ChromaDB collection name |
+
+> **Note:** `generationModel` is only used by `createServer`. When constructing `RagPipeline` directly, you pass the model name to its constructor.
 
 ## Testing
 
