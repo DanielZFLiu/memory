@@ -13,8 +13,7 @@
     "files": [
         "dist",
         "README.md",
-        "LICENSE",
-        "package_scripts"
+        "LICENSE"
     ],
     "repository": {
         "type": "git",

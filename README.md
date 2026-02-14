@@ -10,28 +10,33 @@ A fully local Node.js library and REST API for storing, searching, and querying 
 - **ChromaDB** server running locally
 
 ### Start Ollama & pull models
-
+To pull models, run:
 ```bash
 ollama pull nomic-embed-text-v2-moe
 ollama pull llama3.2
-npm run ollama
 ```
 
-or on a specific port:
-
+If used as api:
 ```bash
+npm run ollama # or
 npm run ollama:port 11435
 ```
 
-### Start ChromaDB
+If used as a npm package:
 ```bash
-npm run db
+ollama serve
 ```
 
-or on a specific port:
-
+### Start ChromaDB
+If used as api:
 ```bash
+npm run db # or
 npm run db:port 9000
+```
+
+If used as a npm package:
+```bash
+chroma run --port 8000
 ```
 
 **Windows note:** If `chroma` is not recognized, the `Scripts` directory may not be on your PATH. Either add it (e.g. `%APPDATA%\Python\Python3xx\Scripts`) or run the executable directly:
@@ -39,17 +44,11 @@ npm run db:port 9000
 & "$env:APPDATA\Python\Python313\Scripts\chroma.exe" run --port 8000
 ```
 
-## Install
-
-```bash
-npm install
-```
-
 ## Usage
 
 ### REST API Server
-
 ```bash
+npm install
 npm run dev
 ```
 
@@ -118,7 +117,7 @@ Returns:
 ### Programmatic Usage (Library)
 
 ```typescript
-import { PieceStore, RagPipeline, MemoryConfig } from "memory";
+import { PieceStore, RagPipeline, MemoryConfig } from "@danielzfliu/memory";
 
 async function main() {
     const config: MemoryConfig = {
