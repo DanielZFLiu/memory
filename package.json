@@ -10,7 +10,11 @@
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "db": "chroma run --port 8000",
+    "db:port": "node ./package_scripts/serve-chroma.js",
+    "ollama": "ollama serve",
+    "ollama:port": "node ./package_scripts/serve-ollama.js"
   },
   "license": "GPL-3.0",
   "dependencies": {

@@ -1,6 +1,5 @@
-# Memory — Local RAG System
-
-A Node.js library and REST API for storing, searching, and querying tagged text pieces using **ChromaDB** for vector storage and **Ollama** for embeddings + generation. Fully local, no cloud APIs required.
+# Memory
+A fully local Node.js library and REST API for storing, searching, and querying tagged text pieces using ChromaDB for vector storage and Ollama for embeddings + generation.
 
 ## Prerequisites
 
@@ -13,19 +12,24 @@ A Node.js library and REST API for storing, searching, and querying tagged text 
 ```bash
 ollama pull nomic-embed-text-v2-moe
 ollama pull llama3.2
+npm run ollama
+```
+
+or on a specific port:
+
+```bash
+npm run ollama:port 11435
 ```
 
 ### Start ChromaDB
-
-Option A — Docker:
 ```bash
-docker run -d -p 8000:8000 chromadb/chroma
+npm run db
 ```
 
-Option B — pip:
+or on a specific port:
+
 ```bash
-pip install chromadb
-chroma run --port 8000
+npm run db:port 9000
 ```
 
 **Windows note:** If `chroma` is not recognized, the `Scripts` directory may not be on your PATH. Either add it (e.g. `%APPDATA%\Python\Python3xx\Scripts`) or run the executable directly:
@@ -114,37 +118,48 @@ Returns:
 ```typescript
 import { PieceStore, RagPipeline, MemoryConfig } from "memory";
 
-const config: MemoryConfig = {
-  chromaUrl: "http://localhost:8000",
-  ollamaUrl: "http://localhost:11434",
-  embeddingModel: "nomic-embed-text-v2-moe",
-};
+async function main() {
+    const config: MemoryConfig = {
+        chromaUrl: "http://localhost:8000",
+        ollamaUrl: "http://localhost:11434",
+        embeddingModel: "nomic-embed-text-v2-moe",
+    };
 
-const store = new PieceStore(config);
-await store.init();
+    const store = new PieceStore(config);
+    await store.init();
 
-// Add pieces
-await store.addPiece("TypeScript is a typed superset of JavaScript.", ["typescript", "programming"]);
-await store.addPiece("Python is great for data science.", ["python", "data-science"]);
+    await store.addPiece("TypeScript is a typed superset of JavaScript.", [
+        "typescript",
+        "programming",
+    ]);
+    await store.addPiece("Python is great for data science.", [
+        "python",
+        "data-science",
+    ]);
 
-// Semantic search
-const results = await store.queryPieces("typed languages", { topK: 5 });
+    const results = await store.queryPieces("typed languages", { topK: 5 });
+    console.log("results", results);
 
-// Search with tag filter
-const filtered = await store.queryPieces("typed languages", {
-  tags: ["typescript"],
-  topK: 5,
+    const filtered = await store.queryPieces("typed languages", {
+        tags: ["typescript"],
+        topK: 5,
+    });
+    console.log("filtered", filtered);
+
+    const rag = new RagPipeline(store, "http://localhost:11434", "llama3.2");
+    const answer = await rag.query("What is TypeScript?", {
+        tags: ["programming"],
+    });
+    console.log("answer", answer);
+}
+
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
 });
-
-// RAG query
-const rag = new RagPipeline(store, "http://localhost:11434", "llama3.2");
-const answer = await rag.query("What is TypeScript?", { tags: ["programming"] });
-console.log(answer.answer);
 ```
 
 ## Configuration (`MemoryConfig`)
-
-All config options have sensible defaults:
 
 | Option | Default | Description |
 |--------|---------|-------------|
