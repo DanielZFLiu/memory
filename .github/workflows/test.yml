@@ -1,0 +1,30 @@
+name: Vitest CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. checkout code
+    - uses: actions/checkout@v4
+
+    # 2. install nodejs
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+
+    # 3. install dependencies
+    - name: Install dependencies
+      run: npm ci
+
+    # 4. run vitest
+    - name: Run Vitest
+      run: npx vitest run
