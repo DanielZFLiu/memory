@@ -1,10 +1,11 @@
 import express, { Request, Response } from "express";
 import { PieceStore } from "./store";
 import { RagPipeline } from "./rag";
-import { MemoryConfig, DEFAULT_MEMORY_CONFIG } from "./types";
+import { MemoryConfig } from "./types";
+import { resolveConfig } from "./config";
 
 export function createServer(config: MemoryConfig = {}) {
-    const resolvedConfig = { ...DEFAULT_MEMORY_CONFIG, ...config };
+    const resolvedConfig = resolveConfig(config);
     const app = express();
     app.use(express.json());
 

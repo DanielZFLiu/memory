@@ -4,10 +4,10 @@ import { EmbeddingClient } from "./embeddings";
 import {
     Piece,
     MemoryConfig,
-    DEFAULT_MEMORY_CONFIG,
     QueryOptions,
     QueryResult,
 } from "./types";
+import { resolveConfig } from "./config";
 
 type ChromaMetadata = Record<string, string | number | boolean>;
 
@@ -26,7 +26,7 @@ export class PieceStore {
     private readonly config: Required<MemoryConfig>;
 
     constructor(config: MemoryConfig = {}) {
-        this.config = { ...DEFAULT_MEMORY_CONFIG, ...config };
+        this.config = resolveConfig(config);
         this.chromaClient = new ChromaClient({ path: this.config.chromaUrl });
         this.embeddingClient = new EmbeddingClient(
             this.config.ollamaUrl,

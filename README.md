@@ -2,12 +2,13 @@
 
 # Memory
 
-A fully local Node.js library and REST API for storing, searching, and querying tagged text pieces using ChromaDB for vector storage and Ollama for embeddings + generation.
+A fully local MCP server and Node.js library for storing, semantically searching, and querying tagged text with ChromaDB (vector storage) and Ollama (embeddings and generation).
 
-Two ways to use Memory:
+Three ways to use Memory:
 
-- REST API Server — Clone the repo and run a standalone HTTP server with CRUD, semantic search, and RAG endpoints.
-- npm Package — Install `@danielzfliu/memory` in your own project and use the classes directly, or embed the Express server in your app.
+- MCP Server — Run Memory as a Model Context Protocol server over stdio and expose memory tools to MCP-compatible clients.
+- npm Package — Install `@danielzfliu/memory` in your own project and use the classes directly (store, embeddings, RAG, and MCP server class).
+- REST API Server — Run the standalone HTTP server with CRUD, semantic search, and RAG endpoints.
 
 ---
 
@@ -25,9 +26,9 @@ ollama pull llama3.2
 
 ---
 
-## Option A: REST API Server
+## Option A: MCP Server (stdio)
 
-Use this option to run Memory as a standalone HTTP service.
+Use this option to run Memory as a standalone MCP server.
 
 ### 1. Setup
 
@@ -49,73 +50,54 @@ npm run db                         # start ChromaDB on default port 8000
 npm run db:port -- 9000            # start ChromaDB on a custom port
 ```
 
-### 3. Start the server
+### 3. Build and run the MCP server
 
 ```bash
-npm run dev
+npm install
+npm run build
+npx -y @danielzfliu/memory
 ```
 
-Server starts on `http://localhost:3000` by default (set `PORT` env var to change).
+Memory MCP communicates over stdio, so it does not bind an HTTP port.
 
-### API Endpoints
+### MCP Client Configuration
 
-#### Add a piece
-```bash
-curl -X POST http://localhost:3000/pieces \
-  -H "Content-Type: application/json" \
-  -d '{"content": "TypeScript is a typed superset of JavaScript.", "tags": ["typescript", "programming"]}'
-```
+#### Claude Desktop (example)
 
-#### Get a piece by ID
-```bash
-curl http://localhost:3000/pieces/<id>
-```
-
-#### Update a piece
-```bash
-curl -X PUT http://localhost:3000/pieces/<id> \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Updated content.", "tags": ["new-tag"]}'
-```
-
-#### Delete a piece
-```bash
-curl -X DELETE http://localhost:3000/pieces/<id>
-```
-
-#### Semantic search
-```bash
-curl -X POST http://localhost:3000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is TypeScript?", "topK": 5}'
-```
-
-With tag filtering:
-```bash
-curl -X POST http://localhost:3000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is TypeScript?", "tags": ["programming"], "topK": 5}'
-```
-
-#### RAG query (retrieve + generate)
-```bash
-curl -X POST http://localhost:3000/rag \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Explain TypeScript", "tags": ["programming"], "topK": 5}'
-```
-
-Returns:
 ```json
 {
-  "answer": "Generated answer based on retrieved context...",
-  "sources": [
-    {
-      "piece": { "id": "...", "content": "...", "tags": ["..."] },
-      "score": 0.87
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@danielzfliu/memory"]
     }
-  ]
+  }
 }
 ```
+
+If you are running from a local clone instead of npm:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "node",
+      "args": ["c:/path/to/memory/dist/main.js"]
+    }
+  }
+}
+```
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `add_piece` | Add a new piece with optional tags |
+| `get_piece` | Retrieve a piece by id |
+| `update_piece` | Update piece content and/or tags |
+| `delete_piece` | Delete a piece by id |
+| `query_pieces` | Semantic search with optional tag filtering |
+| `rag_query` | Retrieve + generate answer with citations |
 
 ---
 
@@ -208,13 +190,110 @@ const app = createServer({
 app.listen(4000, () => console.log("Running on :4000"));
 ```
 
-### Exports
+---
+
+## Option C: REST API Server
+
+Use this option to run Memory as a standalone HTTP service.
+
+### 1. Setup
+
+```bash
+git clone https://github.com/DanielZFLiu/memory.git
+cd memory
+npm install
+```
+
+### 2. Start external services
+
+The repo includes convenience scripts for starting Ollama and ChromaDB:
+
+```bash
+npm run ollama                     # start Ollama on default port 11434
+npm run ollama:port -- 11435       # start Ollama on a custom port
+
+npm run db                         # start ChromaDB on default port 8000
+npm run db:port -- 9000            # start ChromaDB on a custom port
+```
+
+### 3. Start the REST server
+
+```bash
+npm run dev:http
+```
+
+Server starts on `http://localhost:3000` by default (set `PORT` env var to change).
+
+### API Endpoints
+
+#### Add a piece
+```bash
+curl -X POST http://localhost:3000/pieces \
+  -H "Content-Type: application/json" \
+  -d '{"content": "TypeScript is a typed superset of JavaScript.", "tags": ["typescript", "programming"]}'
+```
+
+#### Get a piece by ID
+```bash
+curl http://localhost:3000/pieces/<id>
+```
+
+#### Update a piece
+```bash
+curl -X PUT http://localhost:3000/pieces/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Updated content.", "tags": ["new-tag"]}'
+```
+
+#### Delete a piece
+```bash
+curl -X DELETE http://localhost:3000/pieces/<id>
+```
+
+#### Semantic search
+```bash
+curl -X POST http://localhost:3000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is TypeScript?", "topK": 5}'
+```
+
+With tag filtering:
+```bash
+curl -X POST http://localhost:3000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is TypeScript?", "tags": ["programming"], "topK": 5}'
+```
+
+#### RAG query (retrieve + generate)
+```bash
+curl -X POST http://localhost:3000/rag \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Explain TypeScript", "tags": ["programming"], "topK": 5}'
+```
+
+Returns:
+```json
+{
+  "answer": "Generated answer based on retrieved context...",
+  "sources": [
+    {
+      "piece": { "id": "...", "content": "...", "tags": ["..."] },
+      "score": 0.87
+    }
+  ]
+}
+```
+
+---
+
+## Exports
 
 | Export | Description |
 |--------|-------------|
 | `PieceStore` | CRUD + semantic search over tagged text pieces |
 | `RagPipeline` | Retrieve-then-generate pipeline using `PieceStore` + Ollama |
 | `EmbeddingClient` | Low-level Ollama embedding wrapper |
+| `MemoryMcpServer` | MCP server class (stdio transport) exposing memory tools |
 | `createServer` | Express app factory with all REST endpoints pre-configured |
 | `MemoryConfig` | Configuration interface (all fields optional with defaults) |
 | `DEFAULT_MEMORY_CONFIG` | The default values for `MemoryConfig` |
@@ -252,11 +331,14 @@ npm run test:coverage # with coverage report
 ```
 src/
 ├── types.ts        # Interfaces (MemoryConfig, Piece, QueryResult, etc.)
+├── config.ts       # Default config values and config resolution
 ├── embeddings.ts   # Ollama embedding client
 ├── store.ts        # PieceStore — CRUD + semantic search + tag filtering
 ├── rag.ts          # RAG pipeline — retrieve → prompt → generate
+├── mcp.ts          # MCP server (stdio) + tool handlers
 ├── server.ts       # Express REST API (app factory)
-├── main.ts         # Server entry point (starts listening)
+├── http-main.ts    # HTTP server entry point (starts listening)
+├── main.ts         # MCP entry point (stdio)
 └── index.ts        # Library entry point (public exports)
 tests/
 ├── helpers/        # Shared test fixtures (in-memory ChromaDB mock, etc.)

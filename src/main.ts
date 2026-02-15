@@ -1,7 +1,6 @@
-import { createServer } from "./server";
+#!/usr/bin/env node
 
-const PORT = process.env.PORT ?? 3000;
-const app = createServer();
-app.listen(PORT, () => {
-    console.log(`Memory RAG server running on http://localhost:${PORT}`);
-});
+import { MemoryMcpServer } from "./mcp";
+
+const server = new MemoryMcpServer();
+server.start();
