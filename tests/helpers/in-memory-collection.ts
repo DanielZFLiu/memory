@@ -13,6 +13,23 @@ export interface StoredDoc {
     metadata: Record<string, unknown>;
 }
 
+function parseTags(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return value.filter((tag): tag is string => typeof tag === "string");
+    }
+    if (typeof value === "string") {
+        try {
+            const parsed = JSON.parse(value) as unknown;
+            return Array.isArray(parsed)
+                ? parsed.filter((tag): tag is string => typeof tag === "string")
+                : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
+
 export function createInMemoryCollection() {
     let docs: StoredDoc[] = [];
 
@@ -74,8 +91,8 @@ export function createInMemoryCollection() {
             // Very basic where-clause support for tag filtering
             if (params.where) {
                 candidates = candidates.filter((d) => {
-                    const tags = d.metadata.tags as string[] | undefined;
-                    if (!tags) return false;
+                    const tags = parseTags(d.metadata.tags);
+                    if (tags.length === 0) return false;
                     return matchesWhere(tags, params.where!);
                 });
             }

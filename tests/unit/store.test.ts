@@ -146,6 +146,7 @@ describe("PieceStore", () => {
                 title: "Greeting note",
                 tags: ["greeting"],
             });
+            expect(mockEmbed).toHaveBeenCalledWith("Greeting note\n\nHello world");
             expect(mockAdd).toHaveBeenCalledWith(
                 expect.objectContaining({
                     metadatas: [
@@ -367,7 +368,7 @@ describe("PieceStore", () => {
             );
         });
 
-        it("updates title without re-embedding when only title changes", async () => {
+        it("updates title and re-embeds when only title changes", async () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Existing content"],
@@ -388,9 +389,10 @@ describe("PieceStore", () => {
                 title: "New title",
                 tags: ["keep-me"],
             });
-            expect(mockEmbed).not.toHaveBeenCalled();
+            expect(mockEmbed).toHaveBeenCalledWith("New title\n\nExisting content");
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
+                embeddings: [[0.1, 0.2, 0.3]],
                 metadatas: [
                     expect.objectContaining({
                         tags: '["keep-me"]',
@@ -420,11 +422,26 @@ describe("PieceStore", () => {
                 content: "Existing content",
                 tags: ["keep-me"],
             });
+            expect(mockEmbed).toHaveBeenCalledWith("Existing content");
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
+                embeddings: [[0.1, 0.2, 0.3]],
                 metadatas: [expect.objectContaining({ tags: '["keep-me"]' })],
             });
             expect(mockUpdate.mock.calls[0][0].metadatas[0]).not.toHaveProperty("title");
+        });
+
+        it("preserves title in the embedding when content changes", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Old content"],
+                metadatas: [{ tags: '["keep-me"]', title: "Existing title" }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            await store.updatePiece("id-1", "New content");
+
+            expect(mockEmbed).toHaveBeenCalledWith("Existing title\n\nNew content");
         });
 
         it("returns null if piece does not exist", async () => {

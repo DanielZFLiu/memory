@@ -2,7 +2,9 @@
 
 # Memory
 
-A fully local MCP server and Node.js library for storing, semantically searching, and querying tagged text with ChromaDB (vector storage) and Ollama (embeddings and generation).
+A fully local MCP server and Node.js library for storing, semantically searching, and querying tagged/titled text with ChromaDB (vector storage) and Ollama (embeddings and generation).
+
+Titles are first-class fields. When present, they are included in retrieval embeddings and RAG context.
 
 Three ways to use Memory:
 
@@ -18,15 +20,15 @@ Three ways to use Memory:
 - Ollama running locally ([install](https://ollama.com))
 - ChromaDB server running locally
 
-Pull the required models:
+If you use the default models, pull:
 ```bash
-ollama pull nomic-embed-text-v2-moe
-ollama pull llama3.2
+ollama pull nomic-embed-text:latest
+ollama pull gemma3:latest
 ```
 
 ---
 
-## Option A: MCP Server (stdio)
+## Option A: MCP Server
 
 Use this option to run Memory as a standalone MCP server.
 
@@ -94,10 +96,10 @@ If you are running from a local clone instead of npm:
 |------|-------------|
 | `add_piece` | Add a new piece with optional title and tags |
 | `get_piece` | Retrieve a piece by id |
-| `update_piece` | Update piece content, title, and/or tags |
+| `update_piece` | Update piece content, title, and/or tags (`title: null` clears title) |
 | `delete_piece` | Delete a piece by id |
-| `query_pieces` | Semantic search with optional tag filtering |
-| `rag_query` | Retrieve + generate answer with citations |
+| `query_pieces` | Semantic search over content, plus title when present |
+| `rag_query` | Retrieve + generate answer with citations using content and title context |
 
 ---
 
@@ -136,7 +138,7 @@ async function main() {
     const config: MemoryConfig = {
         chromaUrl: "http://localhost:8000",
         ollamaUrl: "http://localhost:11434",
-        embeddingModel: "nomic-embed-text-v2-moe",
+        embeddingModel: "nomic-embed-text:latest",
     };
 
     // Store: CRUD + semantic search
@@ -163,7 +165,7 @@ async function main() {
     console.log("filtered", filtered);
 
     // RAG: retrieve relevant pieces → generate an answer via Ollama
-    const rag = new RagPipeline(store, config.ollamaUrl!, "llama3.2");
+    const rag = new RagPipeline(store, config.ollamaUrl!, "gemma3:latest");
     const answer = await rag.query("What is TypeScript?", {
         tags: ["programming"],
     });
@@ -246,6 +248,8 @@ curl -X PUT http://localhost:3000/pieces/<id> \
   -d '{"title": "Updated title", "content": "Updated content.", "tags": ["new-tag"]}'
 ```
 
+Set `title` to `null` to clear it.
+
 #### Delete a piece
 ```bash
 curl -X DELETE http://localhost:3000/pieces/<id>
@@ -313,11 +317,11 @@ All fields are optional. Defaults are applied automatically.
 |--------|---------|-------------|
 | `chromaUrl` | `http://localhost:8000` | ChromaDB server URL |
 | `ollamaUrl` | `http://localhost:11434` | Ollama server URL |
-| `embeddingModel` | `nomic-embed-text-v2-moe` | Ollama model for embeddings |
-| `generationModel` | `llama3.2` | Ollama model for RAG generation (used by `createServer`) |
+| `embeddingModel` | `nomic-embed-text:latest` | Ollama model for embeddings |
+| `generationModel` | `gemma3:latest` | Ollama model for RAG generation |
 | `collectionName` | `pieces` | ChromaDB collection name |
 
-> **Note:** `generationModel` is only used by `createServer`. When constructing `RagPipeline` directly, you pass the model name to its constructor.
+> **Note:** `generationModel` is used by `createServer` and `MemoryMcpServer`. When constructing `RagPipeline` directly, you pass the model name to its constructor.
 
 ## Testing
 

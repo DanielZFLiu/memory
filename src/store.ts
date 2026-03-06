@@ -51,6 +51,10 @@ function parseTitle(metadata: Record<string, unknown> | null | undefined): strin
     return normalizeTitle(metadata?.title);
 }
 
+function toEmbeddingText(content: string, title?: string): string {
+    return title ? `${title}\n\n${content}` : content;
+}
+
 export class PieceStore {
     private readonly chromaClient: ChromaClient;
     private readonly embeddingClient: EmbeddingClient;
@@ -83,7 +87,9 @@ export class PieceStore {
     async addPiece(content: string, tags: string[], title?: string): Promise<Piece> {
         const collection = this.getCollection();
         const id = uuidv4();
-        const embedding = await this.embeddingClient.embed(content);
+        const embedding = await this.embeddingClient.embed(
+            toEmbeddingText(content, title),
+        );
 
         await collection.add({
             ids: [id],
@@ -150,8 +156,13 @@ export class PieceStore {
 
         if (content !== undefined) {
             updateData.documents = [newContent];
+        }
+
+        if (content !== undefined || title !== undefined) {
             updateData.embeddings = [
-                await this.embeddingClient.embed(newContent),
+                await this.embeddingClient.embed(
+                    toEmbeddingText(newContent, newTitle),
+                ),
             ];
         }
 

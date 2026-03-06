@@ -263,6 +263,26 @@ describe("Integration: Full API Stack", () => {
             expect(res.status).toBe(200);
             expect(res.body).toEqual([]);
         });
+
+        it("can retrieve a piece by title terms", async () => {
+            await request(app).post("/pieces").send({
+                title: "ZXQV retrieval title",
+                content: "Body text without the special title phrase.",
+                tags: ["title-search"],
+            });
+
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "ZXQV retrieval title", topK: 5 });
+
+            expect(res.status).toBe(200);
+            expect(
+                res.body.some(
+                    (result: { piece: { title?: string } }) =>
+                        result.piece.title === "ZXQV retrieval title",
+                ),
+            ).toBe(true);
+        });
     });
 
     // -------------------------------------------------------------------
