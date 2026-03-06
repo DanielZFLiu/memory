@@ -9,22 +9,46 @@ import {
 } from "./types";
 import { resolveConfig } from "./config";
 
-type ChromaMetadata = Record<string, string | number | boolean>;
+type ChromaMetadataValue = string | number | boolean;
+type ChromaMetadata = Record<string, ChromaMetadataValue>;
 
 function toChromaMetadata(tags: string[], title?: string): ChromaMetadata {
-    const metadata = {
-        tags,
-        ...(title !== undefined ? { title } : {}),
+    const normalizedTags = normalizeTags(tags);
+    const normalizedTitle = normalizeTitle(title);
+
+    return {
+        tags: JSON.stringify(normalizedTags),
+        ...(normalizedTitle !== undefined ? { title: normalizedTitle } : {}),
     };
-    return metadata as unknown as ChromaMetadata;
+}
+
+function normalizeTags(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return value.filter((tag): tag is string => typeof tag === "string");
+    }
+    if (typeof value === "string") {
+        try {
+            const parsed = JSON.parse(value) as unknown;
+            return Array.isArray(parsed)
+                ? parsed.filter((tag): tag is string => typeof tag === "string")
+                : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
+
+function normalizeTitle(value: unknown): string | undefined {
+    return typeof value === "string" ? value : undefined;
 }
 
 function parseTags(metadata: Record<string, unknown> | null | undefined): string[] {
-    return (metadata?.tags as unknown as string[]) ?? [];
+    return normalizeTags(metadata?.tags);
 }
 
 function parseTitle(metadata: Record<string, unknown> | null | undefined): string | undefined {
-    return typeof metadata?.title === "string" ? metadata.title : undefined;
+    return normalizeTitle(metadata?.title);
 }
 
 export class PieceStore {
@@ -104,7 +128,7 @@ export class PieceStore {
         id: string,
         content?: string,
         tags?: string[],
-        title?: string,
+        title?: string | null,
     ): Promise<Piece | null> {
         const collection = this.getCollection();
         const existing = await this.getPiece(id);
@@ -112,7 +136,7 @@ export class PieceStore {
 
         const newContent = content ?? existing.content;
         const newTags = tags ?? existing.tags;
-        const newTitle = title ?? existing.title;
+        const newTitle = title === undefined ? existing.title : title ?? undefined;
 
         const updateData: {
             ids: string[];

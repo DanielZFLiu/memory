@@ -4,6 +4,20 @@ import { RagPipeline } from "./rag";
 import { MemoryConfig } from "./types";
 import { resolveConfig } from "./config";
 
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isPositiveInteger(value: unknown): value is number {
+    return Number.isInteger(value) && typeof value === "number" && value > 0;
+}
+
+function validateTitle(value: unknown, allowNull = false): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (allowNull && value === null) return null;
+    return typeof value === "string" ? value : undefined;
+}
+
 export function createServer(config: MemoryConfig = {}) {
     const resolvedConfig = resolveConfig(config);
     const app = express();
@@ -44,6 +58,14 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "content (string) is required" });
                 return;
             }
+            if (title !== undefined && typeof title !== "string") {
+                res.status(400).json({ error: "title must be a string when provided" });
+                return;
+            }
+            if (tags !== undefined && !isStringArray(tags)) {
+                res.status(400).json({ error: "tags must be an array of strings when provided" });
+                return;
+            }
             const piece = await store.addPiece(content, tags ?? [], title);
             res.status(201).json(piece);
         } catch (err) {
@@ -71,7 +93,20 @@ export function createServer(config: MemoryConfig = {}) {
         try {
             const { id } = req.params;
             const { content, title, tags } = req.body;
-            const piece = await store.updatePiece(id, content, tags, title);
+            if (content !== undefined && typeof content !== "string") {
+                res.status(400).json({ error: "content must be a string when provided" });
+                return;
+            }
+            const validatedTitle = validateTitle(title, true);
+            if (title !== undefined && validatedTitle === undefined) {
+                res.status(400).json({ error: "title must be a string or null when provided" });
+                return;
+            }
+            if (tags !== undefined && !isStringArray(tags)) {
+                res.status(400).json({ error: "tags must be an array of strings when provided" });
+                return;
+            }
+            const piece = await store.updatePiece(id, content, tags, validatedTitle);
             if (!piece) {
                 res.status(404).json({ error: "Piece not found" });
                 return;
@@ -101,6 +136,14 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "query (string) is required" });
                 return;
             }
+            if (tags !== undefined && !isStringArray(tags)) {
+                res.status(400).json({ error: "tags must be an array of strings when provided" });
+                return;
+            }
+            if (topK !== undefined && !isPositiveInteger(topK)) {
+                res.status(400).json({ error: "topK must be a positive integer when provided" });
+                return;
+            }
             const results = await store.queryPieces(query, { tags, topK });
             res.json(results);
         } catch (err) {
@@ -114,6 +157,14 @@ export function createServer(config: MemoryConfig = {}) {
             const { query, tags, topK } = req.body;
             if (!query || typeof query !== "string") {
                 res.status(400).json({ error: "query (string) is required" });
+                return;
+            }
+            if (tags !== undefined && !isStringArray(tags)) {
+                res.status(400).json({ error: "tags must be an array of strings when provided" });
+                return;
+            }
+            if (topK !== undefined && !isPositiveInteger(topK)) {
+                res.status(400).json({ error: "topK must be a positive integer when provided" });
                 return;
             }
             const result = await rag.query(query, { tags, topK });

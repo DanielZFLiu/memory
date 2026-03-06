@@ -143,6 +143,21 @@ describe("MemoryMcpServer", () => {
         });
     });
 
+    it("passes null title through update_piece to clear existing title", async () => {
+        await client.callTool({
+            name: "update_piece",
+            arguments: { id: "piece-1", title: null },
+        });
+
+        expect(mockInit).toHaveBeenCalledTimes(1);
+        expect(mockUpdatePiece).toHaveBeenCalledWith(
+            "piece-1",
+            undefined,
+            undefined,
+            null,
+        );
+    });
+
     it("returns an error for unknown tools", async () => {
         const result = await client.callTool({
             name: "unknown_tool",

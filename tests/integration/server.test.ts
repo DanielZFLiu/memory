@@ -357,6 +357,42 @@ describe("Integration: Full API Stack", () => {
             expect(res.status).toBe(400);
         });
 
+        it("rejects POST /pieces with non-string title", async () => {
+            const res = await request(app)
+                .post("/pieces")
+                .send({ content: "ok", title: 42 });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /pieces with invalid tags", async () => {
+            const res = await request(app)
+                .post("/pieces")
+                .send({ content: "ok", tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects PUT /pieces with invalid title type", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Original content", tags: ["old"] });
+
+            const res = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ title: { nope: true } });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects PUT /pieces with invalid tags", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Original content", tags: ["old"] });
+
+            const res = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
         it("rejects POST /query with missing query", async () => {
             const res = await request(app).post("/query").send({});
             expect(res.status).toBe(400);
@@ -369,6 +405,20 @@ describe("Integration: Full API Stack", () => {
             expect(res.status).toBe(400);
         });
 
+        it("rejects POST /query with invalid tags", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "test", tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /query with invalid topK", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "test", topK: 0 });
+            expect(res.status).toBe(400);
+        });
+
         it("rejects POST /rag with missing query", async () => {
             const res = await request(app).post("/rag").send({});
             expect(res.status).toBe(400);
@@ -378,6 +428,20 @@ describe("Integration: Full API Stack", () => {
             const res = await request(app)
                 .post("/rag")
                 .send({ query: 123 });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /rag with invalid tags", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "test", tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /rag with invalid topK", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "test", topK: -1 });
             expect(res.status).toBe(400);
         });
     });
@@ -450,6 +514,27 @@ describe("Integration: Full API Stack", () => {
             expect(updateRes.status).toBe(200);
             expect(updateRes.body.content).toBe("Original content");
             expect(updateRes.body.tags).toEqual(["new"]);
+        });
+
+        it("clears title when update sends null", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({
+                    title: "Original title",
+                    content: "Original content",
+                    tags: ["old"],
+                });
+
+            const updateRes = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ title: null });
+
+            expect(updateRes.status).toBe(200);
+            expect(updateRes.body).not.toHaveProperty("title");
+
+            const getRes = await request(app).get(`/pieces/${createRes.body.id}`);
+            expect(getRes.status).toBe(200);
+            expect(getRes.body).not.toHaveProperty("title");
         });
 
         it("returns 404 for GET on nonexistent piece", async () => {

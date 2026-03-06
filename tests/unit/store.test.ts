@@ -114,7 +114,7 @@ describe("PieceStore", () => {
                 ids: ["test-uuid-1234"],
                 embeddings: [[0.1, 0.2, 0.3]],
                 documents: ["Hello world"],
-                metadatas: [expect.objectContaining({ tags: ["greeting", "test"] })],
+                metadatas: [expect.objectContaining({ tags: '["greeting","test"]' })],
             });
         });
 
@@ -126,7 +126,7 @@ describe("PieceStore", () => {
             expect(piece.tags).toEqual([]);
             expect(mockAdd).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    metadatas: [expect.objectContaining({ tags: [] })],
+                    metadatas: [expect.objectContaining({ tags: "[]" })],
                 }),
             );
         });
@@ -150,7 +150,7 @@ describe("PieceStore", () => {
                 expect.objectContaining({
                     metadatas: [
                         expect.objectContaining({
-                            tags: ["greeting"],
+                            tags: '["greeting"]',
                             title: "Greeting note",
                         }),
                     ],
@@ -296,7 +296,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old content"],
-                metadatas: [{ tags: ["old"] }],
+                metadatas: [{ tags: '["old"]' }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -314,7 +314,7 @@ describe("PieceStore", () => {
                 ids: ["id-1"],
                 documents: ["New content"],
                 embeddings: [[0.1, 0.2, 0.3]],
-                metadatas: [expect.objectContaining({ tags: ["new"] })],
+                metadatas: [expect.objectContaining({ tags: '["new"]' })],
             });
         });
 
@@ -322,7 +322,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Existing content"],
-                metadatas: [{ tags: ["old"] }],
+                metadatas: [{ tags: '["old"]' }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -338,7 +338,7 @@ describe("PieceStore", () => {
             expect(mockEmbed).not.toHaveBeenCalled();
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
-                metadatas: [expect.objectContaining({ tags: ["newtag"] })],
+                metadatas: [expect.objectContaining({ tags: '["newtag"]' })],
             });
         });
 
@@ -346,7 +346,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old content"],
-                metadatas: [{ tags: ["keep-me"] }],
+                metadatas: [{ tags: '["keep-me"]' }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -362,7 +362,7 @@ describe("PieceStore", () => {
                 expect.objectContaining({
                     documents: ["New content"],
                     embeddings: [[0.1, 0.2, 0.3]],
-                    metadatas: [expect.objectContaining({ tags: ["keep-me"] })],
+                    metadatas: [expect.objectContaining({ tags: '["keep-me"]' })],
                 }),
             );
         });
@@ -371,7 +371,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Existing content"],
-                metadatas: [{ tags: ["keep-me"], title: "Old title" }],
+                metadatas: [{ tags: '["keep-me"]', title: "Old title" }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -393,11 +393,38 @@ describe("PieceStore", () => {
                 ids: ["id-1"],
                 metadatas: [
                     expect.objectContaining({
-                        tags: ["keep-me"],
+                        tags: '["keep-me"]',
                         title: "New title",
                     }),
                 ],
             });
+        });
+
+        it("clears title when null is provided", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Existing content"],
+                metadatas: [{ tags: '["keep-me"]', title: "Old title" }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            const result = await store.updatePiece(
+                "id-1",
+                undefined,
+                undefined,
+                null,
+            );
+
+            expect(result).toEqual({
+                id: "id-1",
+                content: "Existing content",
+                tags: ["keep-me"],
+            });
+            expect(mockUpdate).toHaveBeenCalledWith({
+                ids: ["id-1"],
+                metadatas: [expect.objectContaining({ tags: '["keep-me"]' })],
+            });
+            expect(mockUpdate.mock.calls[0][0].metadatas[0]).not.toHaveProperty("title");
         });
 
         it("returns null if piece does not exist", async () => {
@@ -416,7 +443,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old"],
-                metadatas: [{ tags: [] }],
+                metadatas: [{ tags: "[]" }],
             });
             mockEmbed.mockRejectedValueOnce(new Error("Embed failed"));
 
@@ -430,7 +457,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old"],
-                metadatas: [{ tags: [] }],
+                metadatas: [{ tags: "[]" }],
             });
             mockUpdate.mockRejectedValueOnce(new Error("Update failed"));
 

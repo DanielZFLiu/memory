@@ -122,7 +122,7 @@ export class MemoryMcpServer {
                 inputSchema: z.object({
                     id: z.string().describe("Piece ID"),
                     content: z.string().optional().describe("New content (optional)"),
-                    title: z.string().optional().describe("New title (optional)"),
+                    title: z.union([z.string(), z.null()]).optional().describe("New title, or null to clear it (optional)"),
                     tags: z.array(z.string()).optional().describe("New tags (optional)"),
                 }),
             },
