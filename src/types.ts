@@ -1,6 +1,7 @@
 export interface Piece {
     id: string;
     content: string;
+    title?: string;
     tags: string[];
 }
 

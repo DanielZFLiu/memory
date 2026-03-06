@@ -41,6 +41,7 @@ describe("MemoryMcpServer", () => {
         mockAddPiece.mockResolvedValue({
             id: "piece-1",
             content: "hello",
+            title: "Greeting",
             tags: ["tag-1"],
         });
         mockGetPiece.mockResolvedValue(null);
@@ -96,11 +97,11 @@ describe("MemoryMcpServer", () => {
     it("calls add_piece and returns a text result payload", async () => {
         const result = await client.callTool({
             name: "add_piece",
-            arguments: { content: "hello", tags: ["tag-1"] },
+            arguments: { content: "hello", title: "Greeting", tags: ["tag-1"] },
         });
 
         expect(mockInit).toHaveBeenCalledTimes(1);
-        expect(mockAddPiece).toHaveBeenCalledWith("hello", ["tag-1"]);
+        expect(mockAddPiece).toHaveBeenCalledWith("hello", ["tag-1"], "Greeting");
 
         expect(result.isError).toBeFalsy();
         const content = result.content as Array<{ type: string; text: string }>;
@@ -108,6 +109,7 @@ describe("MemoryMcpServer", () => {
         expect(JSON.parse(content[0].text)).toEqual({
             id: "piece-1",
             content: "hello",
+            title: "Greeting",
             tags: ["tag-1"],
         });
     });

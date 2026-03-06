@@ -131,6 +131,33 @@ describe("PieceStore", () => {
             );
         });
 
+        it("stores and returns title when provided", async () => {
+            mockAdd.mockResolvedValueOnce(undefined);
+
+            const piece = await store.addPiece(
+                "Hello world",
+                ["greeting"],
+                "Greeting note",
+            );
+
+            expect(piece).toEqual({
+                id: "test-uuid-1234",
+                content: "Hello world",
+                title: "Greeting note",
+                tags: ["greeting"],
+            });
+            expect(mockAdd).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    metadatas: [
+                        expect.objectContaining({
+                            tags: ["greeting"],
+                            title: "Greeting note",
+                        }),
+                    ],
+                }),
+            );
+        });
+
         it("generates a unique UUID for each piece", async () => {
             mockAdd.mockResolvedValueOnce(undefined);
 
@@ -220,6 +247,23 @@ describe("PieceStore", () => {
 
             const piece = await store.getPiece("id-1");
             expect(piece?.tags).toEqual([]);
+        });
+
+        it("returns title when present in metadata", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Some content"],
+                metadatas: [{ tags: ["python"], title: "Python note" }],
+            });
+
+            const piece = await store.getPiece("id-1");
+
+            expect(piece).toEqual({
+                id: "id-1",
+                content: "Some content",
+                title: "Python note",
+                tags: ["python"],
+            });
         });
 
         it("propagates ChromaDB errors", async () => {
@@ -323,6 +367,39 @@ describe("PieceStore", () => {
             );
         });
 
+        it("updates title without re-embedding when only title changes", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Existing content"],
+                metadatas: [{ tags: ["keep-me"], title: "Old title" }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            const result = await store.updatePiece(
+                "id-1",
+                undefined,
+                undefined,
+                "New title",
+            );
+
+            expect(result).toEqual({
+                id: "id-1",
+                content: "Existing content",
+                title: "New title",
+                tags: ["keep-me"],
+            });
+            expect(mockEmbed).not.toHaveBeenCalled();
+            expect(mockUpdate).toHaveBeenCalledWith({
+                ids: ["id-1"],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: ["keep-me"],
+                        title: "New title",
+                    }),
+                ],
+            });
+        });
+
         it("returns null if piece does not exist", async () => {
             mockGet.mockResolvedValueOnce({
                 ids: [],
@@ -368,7 +445,7 @@ describe("PieceStore", () => {
             mockQuery.mockResolvedValueOnce({
                 ids: [["id-1", "id-2"]],
                 documents: [["Doc one", "Doc two"]],
-                metadatas: [[{ tags: ["a"] }, { tags: ["b"] }]],
+                metadatas: [[{ tags: ["a"], title: "Doc A" }, { tags: ["b"] }]],
                 distances: [[0.2, 0.5]],
             });
 
@@ -376,7 +453,12 @@ describe("PieceStore", () => {
 
             expect(results).toHaveLength(2);
             expect(results[0]).toEqual({
-                piece: { id: "id-1", content: "Doc one", tags: ["a"] },
+                piece: {
+                    id: "id-1",
+                    content: "Doc one",
+                    title: "Doc A",
+                    tags: ["a"],
+                },
                 score: 0.8, // 1 - 0.2
             });
             expect(results[1]).toEqual({

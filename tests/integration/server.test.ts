@@ -64,12 +64,14 @@ describe("Integration: Full API Stack", () => {
             const createRes = await request(app)
                 .post("/pieces")
                 .send({
+                    title: "TypeScript overview",
                     content: "TypeScript is a typed superset of JavaScript.",
                     tags: ["typescript", "programming"],
                 });
 
             expect(createRes.status).toBe(201);
             expect(createRes.body).toHaveProperty("id");
+            expect(createRes.body.title).toBe("TypeScript overview");
             expect(createRes.body.content).toBe(
                 "TypeScript is a typed superset of JavaScript.",
             );
@@ -82,6 +84,7 @@ describe("Integration: Full API Stack", () => {
 
             expect(getRes.status).toBe(200);
             expect(getRes.body.id).toBe(pieceId);
+            expect(getRes.body.title).toBe("TypeScript overview");
             expect(getRes.body.content).toBe(
                 "TypeScript is a typed superset of JavaScript.",
             );
@@ -90,11 +93,13 @@ describe("Integration: Full API Stack", () => {
             const updateRes = await request(app)
                 .put(`/pieces/${pieceId}`)
                 .send({
+                    title: "TypeScript summary",
                     content: "TypeScript adds static types to JavaScript.",
                     tags: ["typescript"],
                 });
 
             expect(updateRes.status).toBe(200);
+            expect(updateRes.body.title).toBe("TypeScript summary");
             expect(updateRes.body.content).toBe(
                 "TypeScript adds static types to JavaScript.",
             );
@@ -104,6 +109,7 @@ describe("Integration: Full API Stack", () => {
             const getAfterUpdate = await request(app).get(
                 `/pieces/${pieceId}`,
             );
+            expect(getAfterUpdate.body.title).toBe("TypeScript summary");
             expect(getAfterUpdate.body.content).toBe(
                 "TypeScript adds static types to JavaScript.",
             );
@@ -397,6 +403,23 @@ describe("Integration: Full API Stack", () => {
 
             expect(res.status).toBe(201);
             expect(res.body.tags).toEqual([]);
+        });
+
+        it("handles piece title when provided", async () => {
+            const res = await request(app)
+                .post("/pieces")
+                .send({
+                    title: "Unicode note",
+                    content: "Tagged content",
+                    tags: ["example"],
+                });
+
+            expect(res.status).toBe(201);
+            expect(res.body.title).toBe("Unicode note");
+
+            const getRes = await request(app).get(`/pieces/${res.body.id}`);
+            expect(getRes.status).toBe(200);
+            expect(getRes.body.title).toBe("Unicode note");
         });
 
         it("handles unicode content", async () => {

@@ -92,9 +92,9 @@ If you are running from a local clone instead of npm:
 
 | Tool | Description |
 |------|-------------|
-| `add_piece` | Add a new piece with optional tags |
+| `add_piece` | Add a new piece with optional title and tags |
 | `get_piece` | Retrieve a piece by id |
-| `update_piece` | Update piece content and/or tags |
+| `update_piece` | Update piece content, title, and/or tags |
 | `delete_piece` | Delete a piece by id |
 | `query_pieces` | Semantic search with optional tag filtering |
 | `rag_query` | Retrieve + generate answer with citations |
@@ -143,10 +143,11 @@ async function main() {
     const store = new PieceStore(config);
     await store.init();
 
-    await store.addPiece("TypeScript is a typed superset of JavaScript.", [
-        "typescript",
-        "programming",
-    ]);
+    await store.addPiece(
+        "TypeScript is a typed superset of JavaScript.",
+        ["typescript", "programming"],
+        "TypeScript overview",
+    );
     await store.addPiece("Python is great for data science.", [
         "python",
         "data-science",
@@ -230,7 +231,7 @@ Server starts on `http://localhost:3000` by default (set `PORT` env var to chang
 ```bash
 curl -X POST http://localhost:3000/pieces \
   -H "Content-Type: application/json" \
-  -d '{"content": "TypeScript is a typed superset of JavaScript.", "tags": ["typescript", "programming"]}'
+  -d '{"title": "TypeScript overview", "content": "TypeScript is a typed superset of JavaScript.", "tags": ["typescript", "programming"]}'
 ```
 
 #### Get a piece by ID
@@ -242,7 +243,7 @@ curl http://localhost:3000/pieces/<id>
 ```bash
 curl -X PUT http://localhost:3000/pieces/<id> \
   -H "Content-Type: application/json" \
-  -d '{"content": "Updated content.", "tags": ["new-tag"]}'
+  -d '{"title": "Updated title", "content": "Updated content.", "tags": ["new-tag"]}'
 ```
 
 #### Delete a piece
@@ -277,7 +278,7 @@ Returns:
   "answer": "Generated answer based on retrieved context...",
   "sources": [
     {
-      "piece": { "id": "...", "content": "...", "tags": ["..."] },
+      "piece": { "id": "...", "title": "...", "content": "...", "tags": ["..."] },
       "score": 0.87
     }
   ]
@@ -297,7 +298,7 @@ Returns:
 | `createServer` | Express app factory with all REST endpoints pre-configured |
 | `MemoryConfig` | Configuration interface (all fields optional with defaults) |
 | `DEFAULT_MEMORY_CONFIG` | The default values for `MemoryConfig` |
-| `Piece` | `{ id, content, tags }` |
+| `Piece` | `{ id, content, title?, tags }` |
 | `QueryOptions` | `{ tags?, topK? }` |
 | `QueryResult` | `{ piece, score }` |
 | `RagResult` | `{ answer, sources }` |

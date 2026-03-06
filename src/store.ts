@@ -11,12 +11,20 @@ import { resolveConfig } from "./config";
 
 type ChromaMetadata = Record<string, string | number | boolean>;
 
-function toChromaMetadata(tags: string[]): ChromaMetadata {
-    return { tags } as unknown as ChromaMetadata;
+function toChromaMetadata(tags: string[], title?: string): ChromaMetadata {
+    const metadata = {
+        tags,
+        ...(title !== undefined ? { title } : {}),
+    };
+    return metadata as unknown as ChromaMetadata;
 }
 
 function parseTags(metadata: Record<string, unknown> | null | undefined): string[] {
     return (metadata?.tags as unknown as string[]) ?? [];
+}
+
+function parseTitle(metadata: Record<string, unknown> | null | undefined): string | undefined {
+    return typeof metadata?.title === "string" ? metadata.title : undefined;
 }
 
 export class PieceStore {
@@ -48,7 +56,7 @@ export class PieceStore {
         return this.collection;
     }
 
-    async addPiece(content: string, tags: string[]): Promise<Piece> {
+    async addPiece(content: string, tags: string[], title?: string): Promise<Piece> {
         const collection = this.getCollection();
         const id = uuidv4();
         const embedding = await this.embeddingClient.embed(content);
@@ -57,10 +65,15 @@ export class PieceStore {
             ids: [id],
             embeddings: [embedding],
             documents: [content],
-            metadatas: [toChromaMetadata(tags)],
+            metadatas: [toChromaMetadata(tags, title)],
         });
 
-        return { id, content, tags };
+        return {
+            id,
+            content,
+            ...(title !== undefined ? { title } : {}),
+            tags,
+        };
     }
 
     async getPiece(id: string): Promise<Piece | null> {
@@ -72,9 +85,12 @@ export class PieceStore {
 
         if (!result.ids.length) return null;
 
+        const title = parseTitle(result.metadatas[0]);
+
         return {
             id: result.ids[0],
             content: result.documents[0] ?? "",
+            ...(title !== undefined ? { title } : {}),
             tags: parseTags(result.metadatas[0]),
         };
     }
@@ -88,6 +104,7 @@ export class PieceStore {
         id: string,
         content?: string,
         tags?: string[],
+        title?: string,
     ): Promise<Piece | null> {
         const collection = this.getCollection();
         const existing = await this.getPiece(id);
@@ -95,6 +112,7 @@ export class PieceStore {
 
         const newContent = content ?? existing.content;
         const newTags = tags ?? existing.tags;
+        const newTitle = title ?? existing.title;
 
         const updateData: {
             ids: string[];
@@ -103,7 +121,7 @@ export class PieceStore {
             metadatas?: ChromaMetadata[];
         } = {
             ids: [id],
-            metadatas: [toChromaMetadata(newTags)],
+            metadatas: [toChromaMetadata(newTags, newTitle)],
         };
 
         if (content !== undefined) {
@@ -115,7 +133,12 @@ export class PieceStore {
 
         await collection.update(updateData);
 
-        return { id, content: newContent, tags: newTags };
+        return {
+            id,
+            content: newContent,
+            ...(newTitle !== undefined ? { title: newTitle } : {}),
+            tags: newTags,
+        };
     }
 
     async queryPieces(
@@ -158,10 +181,12 @@ export class PieceStore {
         const distances = results.distances?.[0] ?? [];
 
         for (let i = 0; i < ids.length; i++) {
+            const title = parseTitle(metadatas[i]);
             queryResults.push({
                 piece: {
                     id: ids[i],
                     content: documents[i] ?? "",
+                    ...(title !== undefined ? { title } : {}),
                     tags: parseTags(metadatas[i]),
                 },
                 score: 1 - (distances[i] ?? 0), // cosine distance → similarity

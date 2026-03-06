@@ -129,6 +129,32 @@ describe("RagPipeline", () => {
             expect(userMessage).toContain("Question: question");
         });
 
+        it("includes title in the context block when present", async () => {
+            mockQueryPieces.mockResolvedValueOnce([
+                {
+                    piece: {
+                        id: "1",
+                        title: "TypeScript overview",
+                        content: "TypeScript is typed JS",
+                        tags: ["ts"],
+                    },
+                    score: 0.9,
+                },
+            ]);
+            mockChat.mockResolvedValueOnce({
+                message: { content: "answer" },
+            });
+
+            await rag.query("question");
+
+            const chatCall = mockChat.mock.calls[0][0];
+            const userMessage = chatCall.messages[1].content;
+
+            expect(userMessage).toContain(
+                "[1] TypeScript overview (tags: ts)\nTypeScript is typed JS",
+            );
+        });
+
         it("formats source with empty tags correctly", async () => {
             mockQueryPieces.mockResolvedValueOnce([
                 {

@@ -89,12 +89,13 @@ export class MemoryMcpServer {
                 description: "Add a tagged text piece to the memory store.",
                 inputSchema: z.object({
                     content: z.string().describe("Piece content"),
+                    title: z.string().optional().describe("Optional title for display and retrieval context"),
                     tags: z.array(z.string()).optional().describe("Optional tags for filtering and retrieval"),
                 }),
             },
-            async ({ content, tags }): Promise<CallToolResult> => {
+            async ({ content, title, tags }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const piece: Piece = await this.store.addPiece(content, tags ?? []);
+                const piece: Piece = await this.store.addPiece(content, tags ?? [], title);
                 return toolResult(piece);
             },
         );
@@ -121,12 +122,13 @@ export class MemoryMcpServer {
                 inputSchema: z.object({
                     id: z.string().describe("Piece ID"),
                     content: z.string().optional().describe("New content (optional)"),
+                    title: z.string().optional().describe("New title (optional)"),
                     tags: z.array(z.string()).optional().describe("New tags (optional)"),
                 }),
             },
-            async ({ id, content, tags }): Promise<CallToolResult> => {
+            async ({ id, content, title, tags }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const piece = await this.store.updatePiece(id, content, tags);
+                const piece = await this.store.updatePiece(id, content, tags, title);
                 return toolResult({ found: !!piece, piece });
             },
         );

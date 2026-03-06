@@ -39,12 +39,12 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /pieces — Add a piece
     app.post("/pieces", async (req: Request, res: Response) => {
         try {
-            const { content, tags } = req.body;
+            const { content, title, tags } = req.body;
             if (!content || typeof content !== "string") {
                 res.status(400).json({ error: "content (string) is required" });
                 return;
             }
-            const piece = await store.addPiece(content, tags ?? []);
+            const piece = await store.addPiece(content, tags ?? [], title);
             res.status(201).json(piece);
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -70,8 +70,8 @@ export function createServer(config: MemoryConfig = {}) {
     app.put("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
             const { id } = req.params;
-            const { content, tags } = req.body;
-            const piece = await store.updatePiece(id, content, tags);
+            const { content, title, tags } = req.body;
+            const piece = await store.updatePiece(id, content, tags, title);
             if (!piece) {
                 res.status(404).json({ error: "Piece not found" });
                 return;

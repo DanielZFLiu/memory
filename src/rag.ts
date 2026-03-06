@@ -28,7 +28,7 @@ export class RagPipeline {
         const contextBlock = sources
             .map(
                 (s, i) =>
-                    `[${i + 1}] (tags: ${s.piece.tags.join(", ")})\n${s.piece.content}`,
+                    `[${i + 1}]${s.piece.title ? ` ${s.piece.title}` : ""} (tags: ${s.piece.tags.join(", ")})\n${s.piece.content}`,
             )
             .join("\n\n");
 
