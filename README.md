@@ -18,7 +18,7 @@ Three ways to use Memory:
 - Ollama running locally ([install](https://ollama.com))
 - ChromaDB server running locally
 
-Note: To access `chroma run`, run `pip install chromadb`, then add Python's Scripts folder to PATH. 
+Note: To access `chroma run`, run `pip install chromadb`, then add Python's Scripts folder to PATH. Or you know, use docker.
 
 If you use the default models, pull:
 ```bash
