@@ -680,6 +680,168 @@ describe("PieceStore", () => {
                 "Query failed",
             );
         });
+
+        describe("hybrid search", () => {
+            it("over-fetches 3x topK when hybrid search is enabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                });
+
+                await store.queryPieces("test", { topK: 5, useHybridSearch: true });
+
+                expect(mockQuery).toHaveBeenCalledWith(
+                    expect.objectContaining({ nResults: 15 }),
+                );
+            });
+
+            it("does not over-fetch when hybrid search is disabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                });
+
+                await store.queryPieces("test", { topK: 5, useHybridSearch: false });
+
+                expect(mockQuery).toHaveBeenCalledWith(
+                    expect.objectContaining({ nResults: 5 }),
+                );
+            });
+
+            it("boosts results that match query keywords", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2", "id-3"]],
+                    documents: [
+                        [
+                            "Semantically similar but no keyword overlap",
+                            "TypeScript is a typed language",
+                            "Another document without keywords",
+                        ],
+                    ],
+                    metadatas: [[{ tags: ["a"] }, { tags: ["b"] }, { tags: ["c"] }]],
+                    distances: [[0.1, 0.2, 0.3]],
+                });
+
+                const results = await store.queryPieces("TypeScript typed", {
+                    topK: 3,
+                    useHybridSearch: true,
+                });
+
+                expect(results).toHaveLength(3);
+                // id-2 contains both "TypeScript" and "typed", should be ranked higher
+                // than id-1 which has better vector score but no keyword match
+                const ids = results.map((r) => r.piece.id);
+                expect(ids.indexOf("id-2")).toBeLessThan(ids.indexOf("id-3"));
+            });
+
+            it("returns at most topK results after fusion", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2", "id-3", "id-4", "id-5", "id-6"]],
+                    documents: [["A", "B", "C", "D", "E", "F"]],
+                    metadatas: [
+                        [
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                        ],
+                    ],
+                    distances: [[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]],
+                });
+
+                const results = await store.queryPieces("test", {
+                    topK: 2,
+                    useHybridSearch: true,
+                });
+
+                expect(results).toHaveLength(2);
+            });
+
+            it("returns RRF scores instead of cosine similarity when hybrid is enabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1"]],
+                    documents: [["Some content"]],
+                    metadatas: [[{ tags: [] }]],
+                    distances: [[0.2]],
+                });
+
+                const results = await store.queryPieces("content", {
+                    topK: 5,
+                    useHybridSearch: true,
+                });
+
+                expect(results).toHaveLength(1);
+                // RRF score is not 1 - distance; it's 1/(k+rank) based
+                expect(results[0].score).not.toBe(0.8);
+            });
+
+            it("includes title in keyword matching", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2"]],
+                    documents: [
+                        ["generic body text", "generic body text"],
+                    ],
+                    metadatas: [
+                        [
+                            { tags: ["a"], title: "ChromaDB guide" },
+                            { tags: ["b"] },
+                        ],
+                    ],
+                    distances: [[0.3, 0.1]],
+                });
+
+                const results = await store.queryPieces("ChromaDB", {
+                    topK: 2,
+                    useHybridSearch: true,
+                });
+
+                // id-1 has "ChromaDB" in title, so should be boosted despite worse vector score
+                expect(results[0].piece.id).toBe("id-1");
+            });
+
+            it("returns empty array when no results even with hybrid enabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                });
+
+                const results = await store.queryPieces("nothing", {
+                    useHybridSearch: true,
+                });
+
+                expect(results).toEqual([]);
+            });
+
+            it("respects tag filters with hybrid search", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1"]],
+                    documents: [["Python document"]],
+                    metadatas: [[{ tags: '["python"]' }]],
+                    distances: [[0.2]],
+                });
+
+                await store.queryPieces("Python", {
+                    tags: ["python"],
+                    topK: 5,
+                    useHybridSearch: true,
+                });
+
+                expect(mockQuery).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        where: { tags: { $contains: "python" } },
+                        nResults: 15,
+                    }),
+                );
+            });
+        });
     });
 
     describe("uninitialized guard", () => {

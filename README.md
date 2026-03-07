@@ -4,8 +4,6 @@
 
 A fully local MCP server and Node.js library for storing, semantically searching, and querying tagged/titled text with ChromaDB (vector storage) and Ollama (embeddings and generation).
 
-Titles are first-class fields. When present, they are included in retrieval embeddings and RAG context.
-
 Three ways to use Memory:
 
 - MCP Server — Run Memory as a Model Context Protocol server over stdio and expose memory tools to MCP-compatible clients.
@@ -19,6 +17,8 @@ Three ways to use Memory:
 - Node.js ≥ 18
 - Ollama running locally ([install](https://ollama.com))
 - ChromaDB server running locally
+
+Note: To access `chroma run`, run `pip install chromadb`, then add Python's Scripts folder to PATH. 
 
 If you use the default models, pull:
 ```bash
@@ -98,8 +98,8 @@ If you are running from a local clone instead of npm:
 | `get_piece` | Retrieve a piece by id |
 | `update_piece` | Update piece content, title, and/or tags (`title: null` clears title) |
 | `delete_piece` | Delete a piece by id |
-| `query_pieces` | Semantic search over content, plus title when present |
-| `rag_query` | Retrieve + generate answer with citations using content and title context |
+| `query_pieces` | Semantic search over content, plus title when present. Supports hybrid search (vector + keyword via RRF). |
+| `rag_query` | Retrieve + generate answer with citations using content and title context. Supports hybrid search. |
 
 ---
 
@@ -120,11 +120,6 @@ You are responsible for running Ollama and ChromaDB yourself:
 ```bash
 ollama serve                       # default port 11434
 chroma run --port 8000             # default port 8000
-```
-
-**Windows note:** If `chroma` is not recognized, the `Scripts` directory may not be on your PATH. Either add it (e.g. `%APPDATA%\Python\Python3xx\Scripts`) or run the executable directly:
-```powershell
-& "$env:APPDATA\Python\Python313\Scripts\chroma.exe" run --port 8000
 ```
 
 ### 3. Programmatic usage
@@ -163,6 +158,13 @@ async function main() {
         topK: 5,
     });
     console.log("filtered", filtered);
+
+    // Hybrid search: combines vector similarity with keyword matching via RRF
+    const hybrid = await store.queryPieces("typed languages", {
+        topK: 5,
+        useHybridSearch: true,
+    });
+    console.log("hybrid", hybrid);
 
     // RAG: retrieve relevant pieces → generate an answer via Ollama
     const rag = new RagPipeline(store, config.ollamaUrl!, "gemma3:latest");
@@ -269,6 +271,13 @@ curl -X POST http://localhost:3000/query \
   -d '{"query": "What is TypeScript?", "tags": ["programming"], "topK": 5}'
 ```
 
+With hybrid search (vector + keyword via Reciprocal Rank Fusion):
+```bash
+curl -X POST http://localhost:3000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is TypeScript?", "topK": 5, "useHybridSearch": true}'
+```
+
 #### RAG query (retrieve + generate)
 ```bash
 curl -X POST http://localhost:3000/rag \
@@ -303,7 +312,7 @@ Returns:
 | `MemoryConfig` | Configuration interface (all fields optional with defaults) |
 | `DEFAULT_MEMORY_CONFIG` | The default values for `MemoryConfig` |
 | `Piece` | `{ id, content, title?, tags }` |
-| `QueryOptions` | `{ tags?, topK? }` |
+| `QueryOptions` | `{ tags?, topK?, useHybridSearch? }` |
 | `QueryResult` | `{ piece, score }` |
 | `RagResult` | `{ answer, sources }` |
 

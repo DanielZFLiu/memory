@@ -131,7 +131,7 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /query — Semantic search
     app.post("/query", async (req: Request, res: Response) => {
         try {
-            const { query, tags, topK } = req.body;
+            const { query, tags, topK, useHybridSearch } = req.body;
             if (!query || typeof query !== "string") {
                 res.status(400).json({ error: "query (string) is required" });
                 return;
@@ -144,7 +144,11 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "topK must be a positive integer when provided" });
                 return;
             }
-            const results = await store.queryPieces(query, { tags, topK });
+            if (useHybridSearch !== undefined && typeof useHybridSearch !== "boolean") {
+                res.status(400).json({ error: "useHybridSearch must be a boolean when provided" });
+                return;
+            }
+            const results = await store.queryPieces(query, { tags, topK, useHybridSearch });
             res.json(results);
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -154,7 +158,7 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /rag — Full RAG query
     app.post("/rag", async (req: Request, res: Response) => {
         try {
-            const { query, tags, topK } = req.body;
+            const { query, tags, topK, useHybridSearch } = req.body;
             if (!query || typeof query !== "string") {
                 res.status(400).json({ error: "query (string) is required" });
                 return;
@@ -167,7 +171,11 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "topK must be a positive integer when provided" });
                 return;
             }
-            const result = await rag.query(query, { tags, topK });
+            if (useHybridSearch !== undefined && typeof useHybridSearch !== "boolean") {
+                res.status(400).json({ error: "useHybridSearch must be a boolean when provided" });
+                return;
+            }
+            const result = await rag.query(query, { tags, topK, useHybridSearch });
             res.json(result);
         } catch (err) {
             res.status(500).json({ error: String(err) });

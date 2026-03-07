@@ -39,6 +39,35 @@ vi.mock("ollama", () => ({
 import { createServer } from "../../src/server";
 
 // ---------------------------------------------------------------------------
+// Shared seed data used by semantic search, hybrid search, etc.
+// ---------------------------------------------------------------------------
+
+const SEARCH_SEED_DATA = [
+    {
+        content: "TypeScript is a typed superset of JavaScript.",
+        tags: ["typescript", "programming"],
+    },
+    {
+        content: "Python is widely used for data science and ML.",
+        tags: ["python", "programming", "data-science"],
+    },
+    {
+        content: "Express.js is a minimal web framework for Node.js.",
+        tags: ["javascript", "web", "node"],
+    },
+    {
+        content: "ChromaDB is an open-source vector database.",
+        tags: ["database", "ai", "vectors"],
+    },
+];
+
+async function seedSearchData(app: ReturnType<typeof createServer>) {
+    for (const piece of SEARCH_SEED_DATA) {
+        await request(app).post("/pieces").send(piece);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Integration tests — exercise the full HTTP → server → store → rag stack
 // ---------------------------------------------------------------------------
 
@@ -155,29 +184,7 @@ describe("Integration: Full API Stack", () => {
 
     describe("semantic search", () => {
         beforeEach(async () => {
-            // Seed test corpus
-            const seedData = [
-                {
-                    content: "TypeScript is a typed superset of JavaScript.",
-                    tags: ["typescript", "programming"],
-                },
-                {
-                    content: "Python is widely used for data science and ML.",
-                    tags: ["python", "programming", "data-science"],
-                },
-                {
-                    content: "Express.js is a minimal web framework for Node.js.",
-                    tags: ["javascript", "web", "node"],
-                },
-                {
-                    content: "ChromaDB is an open-source vector database.",
-                    tags: ["database", "ai", "vectors"],
-                },
-            ];
-
-            for (const piece of seedData) {
-                await request(app).post("/pieces").send(piece);
-            }
+            await seedSearchData(app);
         });
 
         it("returns results with correct structure", async () => {
@@ -282,6 +289,89 @@ describe("Integration: Full API Stack", () => {
                         result.piece.title === "ZXQV retrieval title",
                 ),
             ).toBe(true);
+        });
+    });
+
+    // -------------------------------------------------------------------
+    // Hybrid Search
+    // -------------------------------------------------------------------
+
+    describe("hybrid search", () => {
+        beforeEach(async () => {
+            await seedSearchData(app);
+        });
+
+        it("returns results with correct structure when hybrid search is enabled", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "TypeScript", topK: 2, useHybridSearch: true });
+
+            expect(res.status).toBe(200);
+            expect(Array.isArray(res.body)).toBe(true);
+            expect(res.body.length).toBeLessThanOrEqual(2);
+
+            for (const result of res.body) {
+                expect(result).toHaveProperty("piece");
+                expect(result).toHaveProperty("score");
+                expect(typeof result.score).toBe("number");
+            }
+        });
+
+        it("boosts keyword-matching results over pure vector results", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "ChromaDB vector database", topK: 4, useHybridSearch: true });
+
+            expect(res.status).toBe(200);
+            // The ChromaDB piece should rank highly because it matches keywords
+            expect(
+                res.body.some(
+                    (r: { piece: { content: string } }) =>
+                        r.piece.content.includes("ChromaDB"),
+                ),
+            ).toBe(true);
+        });
+
+        it("respects tag filters with hybrid search", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({
+                    query: "programming language",
+                    tags: ["python"],
+                    topK: 10,
+                    useHybridSearch: true,
+                });
+
+            expect(res.status).toBe(200);
+            for (const result of res.body) {
+                expect(result.piece.tags).toContain("python");
+            }
+        });
+
+        it("rejects non-boolean useHybridSearch", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "test", useHybridSearch: "yes" });
+
+            expect(res.status).toBe(400);
+        });
+
+        it("works with RAG endpoint", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "What is ChromaDB?", topK: 3, useHybridSearch: true });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toHaveProperty("answer");
+            expect(res.body).toHaveProperty("sources");
+        });
+
+        it("rejects non-boolean useHybridSearch on RAG endpoint", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "test", useHybridSearch: 123 });
+
+            expect(res.status).toBe(400);
         });
     });
 

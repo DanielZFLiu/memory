@@ -151,16 +151,17 @@ export class MemoryMcpServer {
         this.mcpServer.registerTool(
             "query_pieces",
             {
-                description: "Run semantic search over pieces.",
+                description: "Run semantic search over pieces. Enable hybrid search to combine vector similarity with keyword matching via Reciprocal Rank Fusion.",
                 inputSchema: z.object({
                     query: z.string().describe("Semantic query text"),
                     tags: z.array(z.string()).optional().describe("Optional tag filter"),
                     topK: z.number().int().positive().optional().describe("Maximum number of results (default: 10)"),
+                    useHybridSearch: z.boolean().optional().describe("Combine vector and keyword search via RRF (default: false)"),
                 }),
             },
-            async ({ query, tags, topK }): Promise<CallToolResult> => {
+            async ({ query, tags, topK, useHybridSearch }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const results: QueryResult[] = await this.store.queryPieces(query, { tags, topK });
+                const results: QueryResult[] = await this.store.queryPieces(query, { tags, topK, useHybridSearch });
                 return toolResult(results);
             },
         );
@@ -173,11 +174,12 @@ export class MemoryMcpServer {
                     query: z.string().describe("User question"),
                     tags: z.array(z.string()).optional().describe("Optional tag filter"),
                     topK: z.number().int().positive().optional().describe("Maximum number of retrieved sources"),
+                    useHybridSearch: z.boolean().optional().describe("Combine vector and keyword search via RRF (default: false)"),
                 }),
             },
-            async ({ query, tags, topK }): Promise<CallToolResult> => {
+            async ({ query, tags, topK, useHybridSearch }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const result: RagResult = await this.rag.query(query, { tags, topK });
+                const result: RagResult = await this.rag.query(query, { tags, topK, useHybridSearch });
                 return toolResult(result);
             },
         );

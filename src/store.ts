@@ -1,6 +1,7 @@
 import { ChromaClient, Collection, IncludeEnum } from "chromadb";
 import { v4 as uuidv4 } from "uuid";
 import { EmbeddingClient } from "./embeddings";
+import { tokenize, keywordScore, reciprocalRankFusion, RankedItem } from "./hybrid";
 import {
     Piece,
     MemoryConfig,
@@ -181,7 +182,7 @@ export class PieceStore {
         options: QueryOptions = {},
     ): Promise<QueryResult[]> {
         const collection = this.getCollection();
-        const { tags, topK = 10 } = options;
+        const { tags, topK = 10, useHybridSearch = false } = options;
 
         const queryEmbedding = await this.embeddingClient.embed(query);
 
@@ -198,9 +199,11 @@ export class PieceStore {
             }
         }
 
+        const fetchK = useHybridSearch ? topK * 3 : topK;
+
         const results = await collection.query({
             queryEmbeddings: [queryEmbedding],
-            nResults: topK,
+            nResults: fetchK,
             where: whereClause,
             include: [
                 IncludeEnum.Documents,
@@ -209,12 +212,12 @@ export class PieceStore {
             ],
         });
 
-        const queryResults: QueryResult[] = [];
         const ids = results.ids[0] ?? [];
         const documents = results.documents[0] ?? [];
         const metadatas = results.metadatas[0] ?? [];
         const distances = results.distances?.[0] ?? [];
 
+        const queryResults: QueryResult[] = [];
         for (let i = 0; i < ids.length; i++) {
             const title = parseTitle(metadatas[i]);
             queryResults.push({
@@ -228,6 +231,36 @@ export class PieceStore {
             });
         }
 
-        return queryResults;
+        if (!useHybridSearch) {
+            return queryResults;
+        }
+
+        // ── Hybrid: RRF merge of vector ranking + keyword ranking ────────
+        const queryTokens = tokenize(query);
+
+        const vectorRanking: RankedItem<QueryResult>[] = queryResults.map((r) => ({
+            item: r,
+            score: r.score,
+        }));
+
+        const keywordRanking: RankedItem<QueryResult>[] = queryResults
+            .map((r) => ({
+                item: r,
+                score: keywordScore(
+                    queryTokens,
+                    toEmbeddingText(r.piece.content, r.piece.title),
+                ),
+            }))
+            .sort((a, b) => b.score - a.score);
+
+        const fused = reciprocalRankFusion(
+            [vectorRanking, keywordRanking],
+            (r) => r.piece.id,
+        );
+
+        return fused.slice(0, topK).map((f) => ({
+            ...f.item,
+            score: f.score,
+        }));
     }
 }

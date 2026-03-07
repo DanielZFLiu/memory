@@ -19,7 +19,7 @@
 
 > **These guidelines prevent an AI agent from hanging on interactive prompts or blocking commands.**
 
-- **Non-blocking server commands:** `npm run dev` starts a long-running server that never exits. Run it as a **background/non-blocking** command. Do NOT wait for it to complete — it won't. After launching, wait 3–5 seconds, then verify the server is up by hitting an endpoint.
+- **Non-blocking server commands:** `npm run dev:http` starts the REST server and never exits. Run it as a **background/non-blocking** command. Do NOT wait for it to complete — it won't. After launching, wait 3–5 seconds, then verify the server is up by hitting an endpoint.
 - **npm install:** Run `npm install` (do **not** use `--no-optional` — esbuild requires its platform-specific optional dependency). If you have a `package-lock.json` present, `npm ci` is faster and fully non-interactive. These commands DO terminate and can be run blocking.
 - **Avoid interactive prompts:** Never pipe into a command that might request confirmation. If a command could prompt (e.g., `ollama pull`), ensure the model is already available before running the test plan.
 - **Timeouts:** Set reasonable timeouts on HTTP requests. RAG queries (§6) may take 10–60 seconds. Use `Invoke-RestMethod -TimeoutSec 120` if needed.
@@ -36,8 +36,8 @@ Before any functional testing, verify the environment is ready.
 | 0.1 | Node.js ≥ 18 installed | Version string ≥ 18.x | `node --version` |
 | 0.2 | npm dependencies installed | Exit code 0, `node_modules/` exists | `npm install` in project root (blocking — terminates on its own) |
 | 0.3 | Ollama is reachable | JSON response with models list | `Invoke-RestMethod http://localhost:11434/api/tags` |
-| 0.4 | Embedding model available | `nomic-embed-text-v2-moe` listed | Check the response from 0.3 for the model name |
-| 0.5 | Generation model available | `llama3.2` listed | Check the response from 0.3 for the model name |
+| 0.4 | Embedding model available | `nomic-embed-text:latest` listed | Check the response from 0.3 for the model name |
+| 0.5 | Generation model available | `gemma3:latest` listed | Check the response from 0.3 for the model name |
 | 0.6 | ChromaDB is reachable | JSON heartbeat response | `Invoke-RestMethod http://localhost:8000/api/v2/heartbeat` (note: v1 API is deprecated in ChromaDB ≥ 1.x) |
 | 0.7 | ChromaDB and npm client versions are compatible | No version mismatch errors | Server: `docker exec <container> pip show chromadb` (if Docker) or `pip show chromadb` (if pip). Client: `node -e "console.log(require('chromadb/package.json').version)"`. Major versions should match. |
 
@@ -49,7 +49,7 @@ Before any functional testing, verify the environment is ready.
 
 | # | Step | Expected |
 |---|------|----------|
-| 1.1 | Run `npm run dev` as a **non-blocking/background** command. Do NOT wait for it to exit — it is a long-running process. Wait ~5 seconds after launch. | Console output includes `Memory RAG server running on http://localhost:3000` |
+| 1.1 | Run `npm run dev:http` as a **non-blocking/background** command. Do NOT wait for it to exit — it is a long-running process. Wait ~5 seconds after launch. | Console output includes `Memory RAG server running on http://localhost:3000` |
 | 1.2 | Smoke-check server: `Invoke-RestMethod http://localhost:3000/pieces/nonexistent-id` (expect an error response) | Returns JSON with `"error"` field; HTTP 404 status. In PowerShell, `Invoke-RestMethod` throws on non-2xx — wrap in `try/catch` or use `Invoke-WebRequest` and inspect `StatusCode`. |
 
 > **AI agent tip:** For step 1.1, launch the server non-blocking and do not wait for the process to complete. After a brief delay, proceed to step 1.2 to confirm it started.
@@ -69,13 +69,14 @@ Suggested seed data (execute each as a separate request). Example PowerShell com
 ```powershell
 Invoke-RestMethod -Uri http://localhost:3000/pieces -Method POST `
   -ContentType "application/json" `
-  -Body '{"content": "TypeScript is a typed superset of JavaScript that compiles to plain JavaScript.", "tags": ["typescript", "programming", "javascript"]}'
+  -Body '{"title": "TypeScript overview", "content": "TypeScript is a typed superset of JavaScript that compiles to plain JavaScript.", "tags": ["typescript", "programming", "javascript"]}'
 ```
 
 All seed data:
 
 ```
-1. content: "TypeScript is a typed superset of JavaScript that compiles to plain JavaScript."
+1. title: "TypeScript overview"
+   content: "TypeScript is a typed superset of JavaScript that compiles to plain JavaScript."
    tags: ["typescript", "programming", "javascript"]
 
 2. content: "Python is widely used for data science, machine learning, and scripting."
@@ -98,6 +99,7 @@ All seed data:
 | HTTP status | `201` |
 | Response body has `id` | Non-empty string (UUID format) |
 | Response body `content` | Matches input |
+| Response body `title` | Present when title was provided |
 | Response body `tags` | Matches input array |
 
 **Save all returned IDs** — they are needed in later steps. Refer to them as `ID_1` … `ID_5`.
@@ -108,7 +110,8 @@ All seed data:
 |---|------|----------|
 | 2.2.1 | `GET /pieces/{ID_1}` | 200, body matches piece 1 |
 | 2.2.2 | `GET /pieces/{ID_5}` | 200, body matches piece 5 |
-| 2.2.3 | `GET /pieces/does-not-exist-abc` | 404, body contains `"error"` |
+| 2.2.3 | Verify `GET /pieces/{ID_1}` includes `title: "TypeScript overview"` | Title is preserved on read |
+| 2.2.4 | `GET /pieces/does-not-exist-abc` | 404, body contains `"error"` |
 
 ### 2.3 — Update Pieces
 
@@ -116,8 +119,11 @@ All seed data:
 |---|------|----------|
 | 2.3.1 | `PUT /pieces/{ID_1}` with `{"content": "TypeScript adds static types to JavaScript.", "tags": ["typescript", "programming"]}` | 200, body reflects new content and tags |
 | 2.3.2 | `GET /pieces/{ID_1}` after update | Content and tags match the update |
-| 2.3.3 | `PUT /pieces/{ID_1}` with only `{"tags": ["typescript"]}` (no content field) | 200, content unchanged from 2.3.1, tags updated |
-| 2.3.4 | `PUT /pieces/does-not-exist-abc` with `{"content": "x"}` | 404 |
+| 2.3.3 | `PUT /pieces/{ID_1}` with `{"title": "TypeScript summary"}` | 200, title updated and content preserved |
+| 2.3.4 | `PUT /pieces/{ID_1}` with `{"title": null}` | 200, title is cleared |
+| 2.3.5 | `PUT /pieces/{ID_1}` with `{"title": "TypeScript overview"}` | 200, title is restored for later title-based retrieval tests |
+| 2.3.6 | `PUT /pieces/{ID_1}` with only `{"tags": ["typescript"]}` (no content field) | 200, content unchanged from 2.3.1, tags updated |
+| 2.3.7 | `PUT /pieces/does-not-exist-abc` with `{"content": "x"}` | 404 |
 
 ### 2.4 — Delete Pieces
 
@@ -157,12 +163,28 @@ Use `POST /query` with `topK: 4` (we have 4 remaining pieces after the delete in
 | 4.2 | `"machine learning and data analysis"` | The Python piece (ID_2) should rank #1 | Python/data-science piece is the most relevant |
 | 4.3 | `"web server framework"` | The Express.js piece (ID_4) should rank #1 | Express/Node piece is the most relevant |
 | 4.4 | `"How does RAG work?"` | The RAG piece (ID_3) should rank #1 | RAG architecture piece is directly on-topic |
+| 4.5 | `"TypeScript overview"` | The TypeScript piece (ID_1) should still be retrievable by title terms when a title is present | Title text participates in retrieval |
 
 **For each query, verify:**
 - Response is a JSON array.
 - Each element has `piece` (with `id`, `content`, `tags`) and `score` (number between 0 and 1).
 - The ranking order is defensible — briefly explain why the top result is or isn't correct.
 - Scores decrease monotonically (or at least non-increasing).
+
+### 4.6 — Hybrid Search Quality
+
+Use `POST /query` with `useHybridSearch: true`.
+
+| # | Query | Request Body Addition | Expected Behavior |
+|---|-------|-----------------------|-------------------|
+| 4.6.1 | `"TypeScript typed JavaScript"` | `"useHybridSearch": true` | The TypeScript piece (ID_1) should rank at or near the top, with keyword overlap strengthening the result. |
+| 4.6.2 | `"ChromaDB vector database"` | `"useHybridSearch": true` | The ChromaDB piece should rank at or near the top because both semantic and keyword signals align. |
+| 4.6.3 | `"programming"` with tags `['python']` | `"useHybridSearch": true` | Returned results must still respect tag filtering while hybrid search is enabled. |
+
+**For each hybrid query, verify:**
+- Response is a JSON array with the same shape as standard search.
+- `useHybridSearch: true` does not break `tags` or `topK` behavior.
+- The ranking is at least as defensible as pure semantic search for keyword-heavy queries.
 
 ---
 
@@ -192,6 +214,7 @@ Use `POST /rag`.
 | 6.2 | `"Explain how RAG systems work"` | `["ai"]` | 5 | Answer should reference retrieval + generation. Sources should include the RAG piece. |
 | 6.3 | `"What is the best pizza topping?"` | (none) | 5 | Context has no pizza info. Answer should indicate insufficient context. Should NOT hallucinate. |
 | 6.4 | `"Compare Python and TypeScript for programming"` | `["programming"]` | 5 | Answer should draw from both the Python and TypeScript pieces. Both should appear in sources. |
+| 6.5 | `"What is TypeScript overview?"` | `["programming"]` | 5 | If the titled TypeScript piece is retrieved, the response should remain grounded in that source and the corresponding source object should include the title when present. |
 
 **For each RAG query, evaluate:**
 
@@ -216,7 +239,7 @@ Use `POST /rag`.
 | 7.5 | Create piece with unicode content | `POST /pieces` with `{"content": "日本語テスト — emoji 🚀"}` | 201, content preserved |
 | 7.6 | Query with very short query | `POST /query` with `{"query": "a"}` | 200, returns results (may not be relevant, but no crash) |
 | 7.7 | Query with very long query | `POST /query` with query = 1000+ characters | 200, no crash |
-| 7.8 | RAG with topK: 0 | `POST /rag` with `{"query": "test", "topK": 0}` | Should return empty sources with a fixed "not enough context" message (LLM should NOT be called). Verify no hallucination. |
+| 7.8 | RAG with topK: 0 | `POST /rag` with `{"query": "test", "topK": 0}` | 400 validation error because `topK` must be a positive integer |
 | 7.9 | RAG with topK: 1 | `POST /rag` with `{"query": "TypeScript", "topK": 1}` | Exactly 1 source returned |
 | 7.10 | RAG with tag filter returning no matches | `POST /rag` with `{"query": "test", "tags": ["nonexistent-tag"]}` | Should return empty sources with fixed "not enough context" message. LLM must NOT be called, no hallucination. |
 
@@ -229,7 +252,7 @@ Use `POST /rag`.
 | # | Step | Expected |
 |---|------|----------|
 | 8.1 | Stop the server. Find the Node.js process: `Get-Process -Name node -ErrorAction SilentlyContinue` then kill it: `Stop-Process -Name node -Force`. Alternatively, if you launched `npm run dev` in a trackable way, kill by PID. | Server stops; port 3000 is freed |
-| 8.2 | Restart the server with `npm run dev` (**non-blocking**, same as §1.1). Wait ~5 seconds. | Starts successfully, console shows listening message |
+| 8.2 | Restart the server with `npm run dev:http` (**non-blocking**, same as §1.1). Wait ~5 seconds. | Starts successfully, console shows listening message |
 | 8.3 | `Invoke-RestMethod http://localhost:3000/pieces/{ID_1}` | Still returns the piece from §2 — data persisted in ChromaDB |
 | 8.4 | `Invoke-RestMethod -Uri http://localhost:3000/query -Method POST -ContentType "application/json" -Body '{"query": "TypeScript"}'` | Returns results including ID_1 — search still works |
 
@@ -322,5 +345,5 @@ For each RAG test, include:
 - **Timeouts.** RAG queries may take 10–60 seconds depending on model size. Use `Invoke-RestMethod -TimeoutSec 120` for RAG requests. Wait accordingly before declaring a timeout failure.
 - **Idempotency.** This test plan can be run multiple times. Use a fresh ChromaDB collection or clean up the `pieces` collection before running if you want isolated results.
 - **HTTP errors in PowerShell.** `Invoke-RestMethod` throws a terminating error on non-2xx status codes. To inspect 4xx/5xx responses, either wrap calls in `try { ... } catch { $_.Exception.Response }` or use `Invoke-WebRequest` which gives you the full response object including `StatusCode`.
-- **Non-blocking commands.** Any command that starts a persistent server (`npm run dev`, `ollama serve`, etc.) must be launched non-blocking. Do NOT wait for these to exit — they run indefinitely. Verify they started by polling an endpoint after a short delay.
+- **Non-blocking commands.** Any command that starts a persistent server (`npm run dev:http`, `ollama serve`, etc.) must be launched non-blocking. Do NOT wait for these to exit — they run indefinitely. Verify they started by polling an endpoint after a short delay.
 - **Killing processes.** Use `Stop-Process -Name <name> -Force` or `Stop-Process -Id <PID> -Force` to stop servers. Do NOT rely on Ctrl+C or interactive signals.

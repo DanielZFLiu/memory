@@ -16,6 +16,7 @@ export interface MemoryConfig {
 export interface QueryOptions {
     tags?: string[];
     topK?: number;
+    useHybridSearch?: boolean;
 }
 
 export interface QueryResult {
