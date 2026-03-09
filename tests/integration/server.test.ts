@@ -14,12 +14,28 @@ const mockChat = vi.fn(async (..._args: unknown[]) => ({
     message: { content: "Mocked LLM response based on provided context." },
 }));
 
-const inMemoryCollection = createInMemoryCollection();
-const mockGetOrCreateCollection = vi.fn(async () => inMemoryCollection);
+const collectionMap = new Map<string, ReturnType<typeof createInMemoryCollection>>();
+const defaultCollection = createInMemoryCollection();
+collectionMap.set("integration-test", defaultCollection);
+
+const mockGetOrCreateCollection = vi.fn(async (params: { name: string }) => {
+    let col = collectionMap.get(params.name);
+    if (!col) {
+        col = createInMemoryCollection();
+        collectionMap.set(params.name, col);
+    }
+    return col;
+});
+const mockListCollections = vi.fn(async () => Array.from(collectionMap.keys()));
+const mockDeleteCollectionFn = vi.fn(async (params: { name: string }) => {
+    collectionMap.delete(params.name);
+});
 
 vi.mock("chromadb", () => ({
     ChromaClient: class {
         getOrCreateCollection = mockGetOrCreateCollection;
+        listCollections = mockListCollections;
+        deleteCollection = mockDeleteCollectionFn;
     },
     Collection: class {},
     IncludeEnum: {
@@ -39,6 +55,35 @@ vi.mock("ollama", () => ({
 import { createServer } from "../../src/server";
 
 // ---------------------------------------------------------------------------
+// Shared seed data used by semantic search, hybrid search, etc.
+// ---------------------------------------------------------------------------
+
+const SEARCH_SEED_DATA = [
+    {
+        content: "TypeScript is a typed superset of JavaScript.",
+        tags: ["typescript", "programming"],
+    },
+    {
+        content: "Python is widely used for data science and ML.",
+        tags: ["python", "programming", "data-science"],
+    },
+    {
+        content: "Express.js is a minimal web framework for Node.js.",
+        tags: ["javascript", "web", "node"],
+    },
+    {
+        content: "ChromaDB is an open-source vector database.",
+        tags: ["database", "ai", "vectors"],
+    },
+];
+
+async function seedSearchData(app: ReturnType<typeof createServer>) {
+    for (const piece of SEARCH_SEED_DATA) {
+        await request(app).post("/pieces").send(piece);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Integration tests — exercise the full HTTP → server → store → rag stack
 // ---------------------------------------------------------------------------
 
@@ -47,8 +92,21 @@ describe("Integration: Full API Stack", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        inMemoryCollection._clear();
-        mockGetOrCreateCollection.mockImplementation(async () => inMemoryCollection);
+        collectionMap.clear();
+        const freshDefault = createInMemoryCollection();
+        collectionMap.set("integration-test", freshDefault);
+        mockGetOrCreateCollection.mockImplementation(async (params: { name: string }) => {
+            let col = collectionMap.get(params.name);
+            if (!col) {
+                col = createInMemoryCollection();
+                collectionMap.set(params.name, col);
+            }
+            return col;
+        });
+        mockListCollections.mockImplementation(async () => Array.from(collectionMap.keys()));
+        mockDeleteCollectionFn.mockImplementation(async (params: { name: string }) => {
+            collectionMap.delete(params.name);
+        });
         app = createServer({
             collectionName: "integration-test",
         });
@@ -64,12 +122,14 @@ describe("Integration: Full API Stack", () => {
             const createRes = await request(app)
                 .post("/pieces")
                 .send({
+                    title: "TypeScript overview",
                     content: "TypeScript is a typed superset of JavaScript.",
                     tags: ["typescript", "programming"],
                 });
 
             expect(createRes.status).toBe(201);
             expect(createRes.body).toHaveProperty("id");
+            expect(createRes.body.title).toBe("TypeScript overview");
             expect(createRes.body.content).toBe(
                 "TypeScript is a typed superset of JavaScript.",
             );
@@ -82,6 +142,7 @@ describe("Integration: Full API Stack", () => {
 
             expect(getRes.status).toBe(200);
             expect(getRes.body.id).toBe(pieceId);
+            expect(getRes.body.title).toBe("TypeScript overview");
             expect(getRes.body.content).toBe(
                 "TypeScript is a typed superset of JavaScript.",
             );
@@ -90,11 +151,13 @@ describe("Integration: Full API Stack", () => {
             const updateRes = await request(app)
                 .put(`/pieces/${pieceId}`)
                 .send({
+                    title: "TypeScript summary",
                     content: "TypeScript adds static types to JavaScript.",
                     tags: ["typescript"],
                 });
 
             expect(updateRes.status).toBe(200);
+            expect(updateRes.body.title).toBe("TypeScript summary");
             expect(updateRes.body.content).toBe(
                 "TypeScript adds static types to JavaScript.",
             );
@@ -104,6 +167,7 @@ describe("Integration: Full API Stack", () => {
             const getAfterUpdate = await request(app).get(
                 `/pieces/${pieceId}`,
             );
+            expect(getAfterUpdate.body.title).toBe("TypeScript summary");
             expect(getAfterUpdate.body.content).toBe(
                 "TypeScript adds static types to JavaScript.",
             );
@@ -149,29 +213,7 @@ describe("Integration: Full API Stack", () => {
 
     describe("semantic search", () => {
         beforeEach(async () => {
-            // Seed test corpus
-            const seedData = [
-                {
-                    content: "TypeScript is a typed superset of JavaScript.",
-                    tags: ["typescript", "programming"],
-                },
-                {
-                    content: "Python is widely used for data science and ML.",
-                    tags: ["python", "programming", "data-science"],
-                },
-                {
-                    content: "Express.js is a minimal web framework for Node.js.",
-                    tags: ["javascript", "web", "node"],
-                },
-                {
-                    content: "ChromaDB is an open-source vector database.",
-                    tags: ["database", "ai", "vectors"],
-                },
-            ];
-
-            for (const piece of seedData) {
-                await request(app).post("/pieces").send(piece);
-            }
+            await seedSearchData(app);
         });
 
         it("returns results with correct structure", async () => {
@@ -256,6 +298,109 @@ describe("Integration: Full API Stack", () => {
 
             expect(res.status).toBe(200);
             expect(res.body).toEqual([]);
+        });
+
+        it("can retrieve a piece by title terms", async () => {
+            await request(app).post("/pieces").send({
+                title: "ZXQV retrieval title",
+                content: "Body text without the special title phrase.",
+                tags: ["title-search"],
+            });
+
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "ZXQV retrieval title", topK: 5 });
+
+            expect(res.status).toBe(200);
+            expect(
+                res.body.some(
+                    (result: { piece: { title?: string } }) =>
+                        result.piece.title === "ZXQV retrieval title",
+                ),
+            ).toBe(true);
+        });
+    });
+
+    // -------------------------------------------------------------------
+    // Hybrid Search
+    // -------------------------------------------------------------------
+
+    describe("hybrid search", () => {
+        beforeEach(async () => {
+            await seedSearchData(app);
+        });
+
+        it("returns results with correct structure when hybrid search is enabled", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "TypeScript", topK: 2, useHybridSearch: true });
+
+            expect(res.status).toBe(200);
+            expect(Array.isArray(res.body)).toBe(true);
+            expect(res.body.length).toBeLessThanOrEqual(2);
+
+            for (const result of res.body) {
+                expect(result).toHaveProperty("piece");
+                expect(result).toHaveProperty("score");
+                expect(typeof result.score).toBe("number");
+            }
+        });
+
+        it("boosts keyword-matching results over pure vector results", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "ChromaDB vector database", topK: 4, useHybridSearch: true });
+
+            expect(res.status).toBe(200);
+            // The ChromaDB piece should rank highly because it matches keywords
+            expect(
+                res.body.some(
+                    (r: { piece: { content: string } }) =>
+                        r.piece.content.includes("ChromaDB"),
+                ),
+            ).toBe(true);
+        });
+
+        it("respects tag filters with hybrid search", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({
+                    query: "programming language",
+                    tags: ["python"],
+                    topK: 10,
+                    useHybridSearch: true,
+                });
+
+            expect(res.status).toBe(200);
+            for (const result of res.body) {
+                expect(result.piece.tags).toContain("python");
+            }
+        });
+
+        it("rejects non-boolean useHybridSearch", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "test", useHybridSearch: "yes" });
+
+            expect(res.status).toBe(400);
+        });
+
+        it("works with RAG endpoint", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "What is ChromaDB?", topK: 3, useHybridSearch: true });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toHaveProperty("answer");
+            expect(res.body).toHaveProperty("sources");
+        });
+
+        it("rejects non-boolean useHybridSearch on RAG endpoint", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "test", useHybridSearch: 123 });
+
+            expect(res.status).toBe(400);
         });
     });
 
@@ -351,6 +496,42 @@ describe("Integration: Full API Stack", () => {
             expect(res.status).toBe(400);
         });
 
+        it("rejects POST /pieces with non-string title", async () => {
+            const res = await request(app)
+                .post("/pieces")
+                .send({ content: "ok", title: 42 });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /pieces with invalid tags", async () => {
+            const res = await request(app)
+                .post("/pieces")
+                .send({ content: "ok", tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects PUT /pieces with invalid title type", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Original content", tags: ["old"] });
+
+            const res = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ title: { nope: true } });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects PUT /pieces with invalid tags", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Original content", tags: ["old"] });
+
+            const res = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
         it("rejects POST /query with missing query", async () => {
             const res = await request(app).post("/query").send({});
             expect(res.status).toBe(400);
@@ -363,6 +544,20 @@ describe("Integration: Full API Stack", () => {
             expect(res.status).toBe(400);
         });
 
+        it("rejects POST /query with invalid tags", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "test", tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /query with invalid topK", async () => {
+            const res = await request(app)
+                .post("/query")
+                .send({ query: "test", topK: 0 });
+            expect(res.status).toBe(400);
+        });
+
         it("rejects POST /rag with missing query", async () => {
             const res = await request(app).post("/rag").send({});
             expect(res.status).toBe(400);
@@ -372,6 +567,20 @@ describe("Integration: Full API Stack", () => {
             const res = await request(app)
                 .post("/rag")
                 .send({ query: 123 });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /rag with invalid tags", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "test", tags: ["good", 123] });
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects POST /rag with invalid topK", async () => {
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "test", topK: -1 });
             expect(res.status).toBe(400);
         });
     });
@@ -397,6 +606,23 @@ describe("Integration: Full API Stack", () => {
 
             expect(res.status).toBe(201);
             expect(res.body.tags).toEqual([]);
+        });
+
+        it("handles piece title when provided", async () => {
+            const res = await request(app)
+                .post("/pieces")
+                .send({
+                    title: "Unicode note",
+                    content: "Tagged content",
+                    tags: ["example"],
+                });
+
+            expect(res.status).toBe(201);
+            expect(res.body.title).toBe("Unicode note");
+
+            const getRes = await request(app).get(`/pieces/${res.body.id}`);
+            expect(getRes.status).toBe(200);
+            expect(getRes.body.title).toBe("Unicode note");
         });
 
         it("handles unicode content", async () => {
@@ -427,6 +653,27 @@ describe("Integration: Full API Stack", () => {
             expect(updateRes.status).toBe(200);
             expect(updateRes.body.content).toBe("Original content");
             expect(updateRes.body.tags).toEqual(["new"]);
+        });
+
+        it("clears title when update sends null", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({
+                    title: "Original title",
+                    content: "Original content",
+                    tags: ["old"],
+                });
+
+            const updateRes = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ title: null });
+
+            expect(updateRes.status).toBe(200);
+            expect(updateRes.body).not.toHaveProperty("title");
+
+            const getRes = await request(app).get(`/pieces/${createRes.body.id}`);
+            expect(getRes.status).toBe(200);
+            expect(getRes.body).not.toHaveProperty("title");
         });
 
         it("returns 404 for GET on nonexistent piece", async () => {
@@ -480,6 +727,147 @@ describe("Integration: Full API Stack", () => {
 
             expect(res.status).toBe(503);
             expect(res.body.error).toContain("Failed to connect to ChromaDB");
+        });
+    });
+
+    // -------------------------------------------------------------------
+    // Multi-Collection
+    // -------------------------------------------------------------------
+
+    describe("multi-collection", () => {
+        it("isolates pieces between collections", async () => {
+            // Add piece to default collection
+            const defaultRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Default piece", tags: ["default"] });
+            expect(defaultRes.status).toBe(201);
+
+            // Add piece to agent-alice collection
+            const aliceRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Alice piece", tags: ["alice"], collection: "agent-alice" });
+            expect(aliceRes.status).toBe(201);
+
+            // GET from default — should find the default piece
+            const getDefault = await request(app).get(`/pieces/${defaultRes.body.id}`);
+            expect(getDefault.status).toBe(200);
+            expect(getDefault.body.content).toBe("Default piece");
+
+            // GET from agent-alice — should find Alice's piece
+            const getAlice = await request(app).get(`/pieces/${aliceRes.body.id}?collection=agent-alice`);
+            expect(getAlice.status).toBe(200);
+            expect(getAlice.body.content).toBe("Alice piece");
+
+            // GET Alice's piece from default collection — should NOT find it
+            const crossGet = await request(app).get(`/pieces/${aliceRes.body.id}`);
+            expect(crossGet.status).toBe(404);
+        });
+
+        it("searches within the specified collection only", async () => {
+            await request(app)
+                .post("/pieces")
+                .send({ content: "TypeScript is great", tags: ["ts"] });
+
+            await request(app)
+                .post("/pieces")
+                .send({ content: "Python is great", tags: ["py"], collection: "agent-bob" });
+
+            // Query default collection
+            const defaultResults = await request(app)
+                .post("/query")
+                .send({ query: "programming", topK: 10 });
+            expect(defaultResults.status).toBe(200);
+            expect(defaultResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("TypeScript"),
+            )).toBe(true);
+            expect(defaultResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("Python"),
+            )).toBe(false);
+
+            // Query agent-bob collection
+            const bobResults = await request(app)
+                .post("/query")
+                .send({ query: "programming", topK: 10, collection: "agent-bob" });
+            expect(bobResults.status).toBe(200);
+            expect(bobResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("Python"),
+            )).toBe(true);
+            expect(bobResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("TypeScript"),
+            )).toBe(false);
+        });
+
+        it("lists all collections", async () => {
+            // Access a second collection to create it
+            await request(app)
+                .post("/pieces")
+                .send({ content: "test", tags: [], collection: "agent-alice" });
+
+            const res = await request(app).get("/collections");
+            expect(res.status).toBe(200);
+            expect(res.body.collections).toContain("integration-test");
+            expect(res.body.collections).toContain("agent-alice");
+        });
+
+        it("deletes a collection", async () => {
+            // Create a collection
+            await request(app)
+                .post("/pieces")
+                .send({ content: "temp", tags: [], collection: "to-delete" });
+
+            // Verify it exists
+            let listRes = await request(app).get("/collections");
+            expect(listRes.body.collections).toContain("to-delete");
+
+            // Delete it
+            const deleteRes = await request(app).delete("/collections/to-delete");
+            expect(deleteRes.status).toBe(204);
+
+            // Verify it's gone
+            listRes = await request(app).get("/collections");
+            expect(listRes.body.collections).not.toContain("to-delete");
+        });
+
+        it("updates a piece in a specific collection", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Original", tags: ["x"], collection: "agent-alice" });
+
+            const updateRes = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ content: "Updated", collection: "agent-alice" });
+
+            expect(updateRes.status).toBe(200);
+            expect(updateRes.body.content).toBe("Updated");
+        });
+
+        it("deletes a piece from a specific collection", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "To delete", tags: [], collection: "agent-alice" });
+
+            const deleteRes = await request(app)
+                .delete(`/pieces/${createRes.body.id}?collection=agent-alice`);
+            expect(deleteRes.status).toBe(204);
+
+            const getRes = await request(app)
+                .get(`/pieces/${createRes.body.id}?collection=agent-alice`);
+            expect(getRes.status).toBe(404);
+        });
+
+        it("RAG query targets the specified collection", async () => {
+            await request(app)
+                .post("/pieces")
+                .send({ content: "RAG info for Alice's agent", tags: ["ai"], collection: "agent-alice" });
+
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "RAG", topK: 5, collection: "agent-alice" });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toHaveProperty("answer");
+            expect(res.body.sources.length).toBeGreaterThan(0);
+            expect(res.body.sources[0].piece.content).toContain("Alice");
         });
     });
 });

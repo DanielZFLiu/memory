@@ -6,6 +6,8 @@ const mockDelete = vi.fn();
 const mockUpdate = vi.fn();
 const mockQuery = vi.fn();
 
+const tagKey = (tag: string) => `tag_${Buffer.from(tag, "utf8").toString("base64url")}`;
+
 const mockCollection = {
     add: mockAdd,
     get: mockGet,
@@ -15,10 +17,14 @@ const mockCollection = {
 };
 
 const mockGetOrCreateCollection = vi.fn().mockResolvedValue(mockCollection);
+const mockListCollections = vi.fn().mockResolvedValue([]);
+const mockDeleteCollection = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("chromadb", () => ({
     ChromaClient: class MockChromaClient {
         getOrCreateCollection = mockGetOrCreateCollection;
+        listCollections = mockListCollections;
+        deleteCollection = mockDeleteCollection;
     },
     Collection: class {},
     IncludeEnum: {
@@ -48,6 +54,8 @@ describe("PieceStore", () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         mockGetOrCreateCollection.mockResolvedValue(mockCollection);
+        mockListCollections.mockResolvedValue([]);
+        mockDeleteCollection.mockResolvedValue(undefined);
         mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
 
         store = new PieceStore({
@@ -114,7 +122,13 @@ describe("PieceStore", () => {
                 ids: ["test-uuid-1234"],
                 embeddings: [[0.1, 0.2, 0.3]],
                 documents: ["Hello world"],
-                metadatas: [expect.objectContaining({ tags: ["greeting", "test"] })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["greeting","test"]',
+                        [tagKey("greeting")]: true,
+                        [tagKey("test")]: true,
+                    }),
+                ],
             });
         });
 
@@ -126,7 +140,36 @@ describe("PieceStore", () => {
             expect(piece.tags).toEqual([]);
             expect(mockAdd).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    metadatas: [expect.objectContaining({ tags: [] })],
+                    metadatas: [expect.objectContaining({ tags: "[]" })],
+                }),
+            );
+        });
+
+        it("stores and returns title when provided", async () => {
+            mockAdd.mockResolvedValueOnce(undefined);
+
+            const piece = await store.addPiece(
+                "Hello world",
+                ["greeting"],
+                "Greeting note",
+            );
+
+            expect(piece).toEqual({
+                id: "test-uuid-1234",
+                content: "Hello world",
+                title: "Greeting note",
+                tags: ["greeting"],
+            });
+            expect(mockEmbed).toHaveBeenCalledWith("Greeting note\n\nHello world");
+            expect(mockAdd).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    metadatas: [
+                        expect.objectContaining({
+                            tags: '["greeting"]',
+                            [tagKey("greeting")]: true,
+                            title: "Greeting note",
+                        }),
+                    ],
                 }),
             );
         });
@@ -222,6 +265,23 @@ describe("PieceStore", () => {
             expect(piece?.tags).toEqual([]);
         });
 
+        it("returns title when present in metadata", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Some content"],
+                metadatas: [{ tags: ["python"], title: "Python note" }],
+            });
+
+            const piece = await store.getPiece("id-1");
+
+            expect(piece).toEqual({
+                id: "id-1",
+                content: "Some content",
+                title: "Python note",
+                tags: ["python"],
+            });
+        });
+
         it("propagates ChromaDB errors", async () => {
             mockGet.mockRejectedValueOnce(new Error("DB error"));
 
@@ -252,7 +312,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old content"],
-                metadatas: [{ tags: ["old"] }],
+                metadatas: [{ tags: '["old"]' }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -270,7 +330,12 @@ describe("PieceStore", () => {
                 ids: ["id-1"],
                 documents: ["New content"],
                 embeddings: [[0.1, 0.2, 0.3]],
-                metadatas: [expect.objectContaining({ tags: ["new"] })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["new"]',
+                        [tagKey("new")]: true,
+                    }),
+                ],
             });
         });
 
@@ -278,7 +343,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Existing content"],
-                metadatas: [{ tags: ["old"] }],
+                metadatas: [{ tags: '["old"]' }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -294,7 +359,12 @@ describe("PieceStore", () => {
             expect(mockEmbed).not.toHaveBeenCalled();
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
-                metadatas: [expect.objectContaining({ tags: ["newtag"] })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["newtag"]',
+                        [tagKey("newtag")]: true,
+                    }),
+                ],
             });
         });
 
@@ -302,7 +372,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old content"],
-                metadatas: [{ tags: ["keep-me"] }],
+                metadatas: [{ tags: '["keep-me"]' }],
             });
             mockUpdate.mockResolvedValueOnce(undefined);
 
@@ -318,9 +388,96 @@ describe("PieceStore", () => {
                 expect.objectContaining({
                     documents: ["New content"],
                     embeddings: [[0.1, 0.2, 0.3]],
-                    metadatas: [expect.objectContaining({ tags: ["keep-me"] })],
+                    metadatas: [
+                        expect.objectContaining({
+                            tags: '["keep-me"]',
+                            [tagKey("keep-me")]: true,
+                        }),
+                    ],
                 }),
             );
+        });
+
+        it("updates title and re-embeds when only title changes", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Existing content"],
+                metadatas: [{ tags: '["keep-me"]', title: "Old title" }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            const result = await store.updatePiece(
+                "id-1",
+                undefined,
+                undefined,
+                "New title",
+            );
+
+            expect(result).toEqual({
+                id: "id-1",
+                content: "Existing content",
+                title: "New title",
+                tags: ["keep-me"],
+            });
+            expect(mockEmbed).toHaveBeenCalledWith("New title\n\nExisting content");
+            expect(mockUpdate).toHaveBeenCalledWith({
+                ids: ["id-1"],
+                embeddings: [[0.1, 0.2, 0.3]],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["keep-me"]',
+                        [tagKey("keep-me")]: true,
+                        title: "New title",
+                    }),
+                ],
+            });
+        });
+
+        it("clears title when null is provided", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Existing content"],
+                metadatas: [{ tags: '["keep-me"]', title: "Old title" }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            const result = await store.updatePiece(
+                "id-1",
+                undefined,
+                undefined,
+                null,
+            );
+
+            expect(result).toEqual({
+                id: "id-1",
+                content: "Existing content",
+                tags: ["keep-me"],
+            });
+            expect(mockEmbed).toHaveBeenCalledWith("Existing content");
+            expect(mockUpdate).toHaveBeenCalledWith({
+                ids: ["id-1"],
+                embeddings: [[0.1, 0.2, 0.3]],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["keep-me"]',
+                        [tagKey("keep-me")]: true,
+                    }),
+                ],
+            });
+            expect(mockUpdate.mock.calls[0][0].metadatas[0]).not.toHaveProperty("title");
+        });
+
+        it("preserves title in the embedding when content changes", async () => {
+            mockGet.mockResolvedValueOnce({
+                ids: ["id-1"],
+                documents: ["Old content"],
+                metadatas: [{ tags: '["keep-me"]', title: "Existing title" }],
+            });
+            mockUpdate.mockResolvedValueOnce(undefined);
+
+            await store.updatePiece("id-1", "New content");
+
+            expect(mockEmbed).toHaveBeenCalledWith("Existing title\n\nNew content");
         });
 
         it("returns null if piece does not exist", async () => {
@@ -339,7 +496,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old"],
-                metadatas: [{ tags: [] }],
+                metadatas: [{ tags: "[]" }],
             });
             mockEmbed.mockRejectedValueOnce(new Error("Embed failed"));
 
@@ -353,7 +510,7 @@ describe("PieceStore", () => {
             mockGet.mockResolvedValueOnce({
                 ids: ["id-1"],
                 documents: ["Old"],
-                metadatas: [{ tags: [] }],
+                metadatas: [{ tags: "[]" }],
             });
             mockUpdate.mockRejectedValueOnce(new Error("Update failed"));
 
@@ -368,7 +525,7 @@ describe("PieceStore", () => {
             mockQuery.mockResolvedValueOnce({
                 ids: [["id-1", "id-2"]],
                 documents: [["Doc one", "Doc two"]],
-                metadatas: [[{ tags: ["a"] }, { tags: ["b"] }]],
+                metadatas: [[{ tags: ["a"], title: "Doc A" }, { tags: ["b"] }]],
                 distances: [[0.2, 0.5]],
             });
 
@@ -376,7 +533,12 @@ describe("PieceStore", () => {
 
             expect(results).toHaveLength(2);
             expect(results[0]).toEqual({
-                piece: { id: "id-1", content: "Doc one", tags: ["a"] },
+                piece: {
+                    id: "id-1",
+                    content: "Doc one",
+                    title: "Doc A",
+                    tags: ["a"],
+                },
                 score: 0.8, // 1 - 0.2
             });
             expect(results[1]).toEqual({
@@ -442,7 +604,7 @@ describe("PieceStore", () => {
 
             expect(mockQuery).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    where: { tags: { $contains: "python" } },
+                    where: { [tagKey("python")]: true },
                 }),
             );
         });
@@ -461,8 +623,8 @@ describe("PieceStore", () => {
                 expect.objectContaining({
                     where: {
                         $and: [
-                            { tags: { $contains: "python" } },
-                            { tags: { $contains: "rag" } },
+                            { [tagKey("python")]: true },
+                            { [tagKey("rag")]: true },
                         ],
                     },
                 }),
@@ -554,6 +716,199 @@ describe("PieceStore", () => {
                 "Query failed",
             );
         });
+
+        describe("hybrid search", () => {
+            it("over-fetches 3x topK when hybrid search is enabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                });
+
+                await store.queryPieces("test", { topK: 5, useHybridSearch: true });
+
+                expect(mockQuery).toHaveBeenCalledWith(
+                    expect.objectContaining({ nResults: 15 }),
+                );
+            });
+
+            it("does not over-fetch when hybrid search is disabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                });
+
+                await store.queryPieces("test", { topK: 5, useHybridSearch: false });
+
+                expect(mockQuery).toHaveBeenCalledWith(
+                    expect.objectContaining({ nResults: 5 }),
+                );
+            });
+
+            it("boosts results that match query keywords", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2", "id-3"]],
+                    documents: [
+                        [
+                            "Semantically similar but no keyword overlap",
+                            "TypeScript is a typed language",
+                            "Another document without keywords",
+                        ],
+                    ],
+                    metadatas: [[{ tags: ["a"] }, { tags: ["b"] }, { tags: ["c"] }]],
+                    distances: [[0.1, 0.2, 0.3]],
+                });
+
+                const results = await store.queryPieces("TypeScript typed", {
+                    topK: 3,
+                    useHybridSearch: true,
+                });
+
+                expect(results).toHaveLength(3);
+                // id-2 contains both "TypeScript" and "typed", should be ranked higher
+                // than id-1 which has better vector score but no keyword match
+                const ids = results.map((r) => r.piece.id);
+                expect(ids.indexOf("id-2")).toBeLessThan(ids.indexOf("id-3"));
+            });
+
+            it("returns at most topK results after fusion", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2", "id-3", "id-4", "id-5", "id-6"]],
+                    documents: [["A", "B", "C", "D", "E", "F"]],
+                    metadatas: [
+                        [
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                            { tags: [] },
+                        ],
+                    ],
+                    distances: [[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]],
+                });
+
+                const results = await store.queryPieces("test", {
+                    topK: 2,
+                    useHybridSearch: true,
+                });
+
+                expect(results).toHaveLength(2);
+            });
+
+            it("returns RRF scores instead of cosine similarity when hybrid is enabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1"]],
+                    documents: [["Some content"]],
+                    metadatas: [[{ tags: [] }]],
+                    distances: [[0.2]],
+                });
+
+                const results = await store.queryPieces("content", {
+                    topK: 5,
+                    useHybridSearch: true,
+                });
+
+                expect(results).toHaveLength(1);
+                // RRF score is not 1 - distance; it's 1/(k+rank) based
+                expect(results[0].score).not.toBe(0.8);
+            });
+
+            it("does not grant keyword fusion credit to documents with zero keyword overlap", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2"]],
+                    documents: [["No overlap here", "Another unrelated document"]],
+                    metadatas: [[{ tags: [] }, { tags: [] }]],
+                    distances: [[0.2, 0.4]],
+                });
+
+                const semanticResults = await store.queryPieces("TypeScript", {
+                    topK: 2,
+                });
+
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2"]],
+                    documents: [["No overlap here", "Another unrelated document"]],
+                    metadatas: [[{ tags: [] }, { tags: [] }]],
+                    distances: [[0.2, 0.4]],
+                });
+
+                const hybridResults = await store.queryPieces("TypeScript", {
+                    topK: 2,
+                    useHybridSearch: true,
+                });
+
+                expect(hybridResults.map((result) => result.piece.id)).toEqual(
+                    semanticResults.map((result) => result.piece.id),
+                );
+                expect(hybridResults[0].score).toBeCloseTo(1 / 61, 10);
+                expect(hybridResults[1].score).toBeCloseTo(1 / 62, 10);
+            });
+
+            it("includes title in keyword matching", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2"]],
+                    documents: [
+                        ["generic body text", "generic body text"],
+                    ],
+                    metadatas: [
+                        [
+                            { tags: ["a"], title: "ChromaDB guide" },
+                            { tags: ["b"] },
+                        ],
+                    ],
+                    distances: [[0.3, 0.1]],
+                });
+
+                const results = await store.queryPieces("ChromaDB", {
+                    topK: 2,
+                    useHybridSearch: true,
+                });
+
+                // id-1 has "ChromaDB" in title, so should be boosted despite worse vector score
+                expect(results[0].piece.id).toBe("id-1");
+            });
+
+            it("returns empty array when no results even with hybrid enabled", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                });
+
+                const results = await store.queryPieces("nothing", {
+                    useHybridSearch: true,
+                });
+
+                expect(results).toEqual([]);
+            });
+
+            it("respects tag filters with hybrid search", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1"]],
+                    documents: [["Python document"]],
+                    metadatas: [[{ tags: '["python"]' }]],
+                    distances: [[0.2]],
+                });
+
+                await store.queryPieces("Python", {
+                    tags: ["python"],
+                    topK: 5,
+                    useHybridSearch: true,
+                });
+
+                expect(mockQuery).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        where: { [tagKey("python")]: true },
+                        nResults: 15,
+                    }),
+                );
+            });
+        });
     });
 
     describe("uninitialized guard", () => {
@@ -595,6 +950,222 @@ describe("PieceStore", () => {
             await expect(
                 uninitializedStore.queryPieces("query"),
             ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling listCollections before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.listCollections(),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling deleteCollection before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.deleteCollection("test"),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+    });
+
+    describe("multi-collection", () => {
+        it("uses default collection when no collection param is provided", async () => {
+            mockAdd.mockResolvedValueOnce(undefined);
+
+            await store.addPiece("Hello", ["tag"]);
+
+            expect(mockGetOrCreateCollection).toHaveBeenCalledWith({
+                name: "test-pieces",
+                metadata: { "hnsw:space": "cosine" },
+            });
+        });
+
+        it("creates and caches a new collection when collection param is provided", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.addPiece("Hello", ["tag"], undefined, "agent-alice");
+
+            expect(mockGetOrCreateCollection).toHaveBeenCalledWith({
+                name: "agent-alice",
+                metadata: { "hnsw:space": "cosine" },
+            });
+            expect(altCollection.add).toHaveBeenCalled();
+            expect(mockAdd).not.toHaveBeenCalled();
+        });
+
+        it("reuses cached collection on subsequent calls", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.addPiece("First", ["tag"], undefined, "agent-alice");
+            await store.addPiece("Second", ["tag"], undefined, "agent-alice");
+
+            // getOrCreateCollection called once during init (default) + once for agent-alice
+            // The second addPiece to agent-alice should reuse the cached collection
+            const aliceCalls = mockGetOrCreateCollection.mock.calls.filter(
+                (call: unknown[]) => (call[0] as { name: string }).name === "agent-alice",
+            );
+            expect(aliceCalls).toHaveLength(1);
+            expect(altCollection.add).toHaveBeenCalledTimes(2);
+        });
+
+        it("isolates operations between collections", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn().mockResolvedValue({
+                    ids: ["alt-id"],
+                    documents: ["Alt content"],
+                    metadatas: [{ tags: '["alt"]' }],
+                }),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            mockGet.mockResolvedValueOnce({
+                ids: ["default-id"],
+                documents: ["Default content"],
+                metadatas: [{ tags: '["default"]' }],
+            });
+
+            const defaultPiece = await store.getPiece("default-id");
+            const altPiece = await store.getPiece("alt-id", "agent-alice");
+
+            expect(mockGet).toHaveBeenCalledWith({
+                ids: ["default-id"],
+                include: ["documents", "metadatas"],
+            });
+            expect(altCollection.get).toHaveBeenCalledWith({
+                ids: ["alt-id"],
+                include: ["documents", "metadatas"],
+            });
+            expect(defaultPiece?.content).toBe("Default content");
+            expect(altPiece?.content).toBe("Alt content");
+        });
+
+        it("passes collection param through to deletePiece", async () => {
+            const altCollection = {
+                add: vi.fn(),
+                get: vi.fn(),
+                delete: vi.fn().mockResolvedValue(undefined),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.deletePiece("some-id", "agent-alice");
+
+            expect(altCollection.delete).toHaveBeenCalledWith({ ids: ["some-id"] });
+            expect(mockDelete).not.toHaveBeenCalled();
+        });
+
+        it("passes collection param through to queryPieces", async () => {
+            const altCollection = {
+                add: vi.fn(),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn().mockResolvedValue({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                }),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.queryPieces("test", {}, "agent-alice");
+
+            expect(altCollection.query).toHaveBeenCalled();
+            expect(mockQuery).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("listCollections", () => {
+        it("returns collection names from ChromaDB", async () => {
+            mockListCollections.mockResolvedValueOnce(["pieces", "agent-alice", "agent-bob"]);
+
+            const result = await store.listCollections();
+
+            expect(result).toEqual(["pieces", "agent-alice", "agent-bob"]);
+            expect(mockListCollections).toHaveBeenCalledTimes(1);
+        });
+
+        it("returns empty array when no collections exist", async () => {
+            mockListCollections.mockResolvedValueOnce([]);
+
+            const result = await store.listCollections();
+
+            expect(result).toEqual([]);
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockListCollections.mockRejectedValueOnce(new Error("DB error"));
+
+            await expect(store.listCollections()).rejects.toThrow("DB error");
+        });
+    });
+
+    describe("deleteCollection", () => {
+        it("deletes the collection from ChromaDB", async () => {
+            await store.deleteCollection("agent-alice");
+
+            expect(mockDeleteCollection).toHaveBeenCalledWith({ name: "agent-alice" });
+        });
+
+        it("removes collection from cache after deletion", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            // Access to populate cache
+            await store.addPiece("Hello", [], undefined, "agent-alice");
+
+            // Delete the collection
+            await store.deleteCollection("agent-alice");
+
+            // Next access should call getOrCreateCollection again
+            const newAltCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(newAltCollection);
+
+            await store.addPiece("Hello again", [], undefined, "agent-alice");
+
+            const aliceCalls = mockGetOrCreateCollection.mock.calls.filter(
+                (call: unknown[]) => (call[0] as { name: string }).name === "agent-alice",
+            );
+            expect(aliceCalls).toHaveLength(2);
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockDeleteCollection.mockRejectedValueOnce(new Error("Delete failed"));
+
+            await expect(store.deleteCollection("test")).rejects.toThrow("Delete failed");
         });
     });
 });

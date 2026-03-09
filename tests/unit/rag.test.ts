@@ -93,7 +93,7 @@ describe("RagPipeline", () => {
             expect(mockQueryPieces).toHaveBeenCalledWith("test", {
                 tags: ["python"],
                 topK: 3,
-            });
+            }, undefined);
         });
 
         it("passes default empty options to store.queryPieces", async () => {
@@ -101,7 +101,7 @@ describe("RagPipeline", () => {
 
             await rag.query("test");
 
-            expect(mockQueryPieces).toHaveBeenCalledWith("test", {});
+            expect(mockQueryPieces).toHaveBeenCalledWith("test", {}, undefined);
         });
 
         it("builds context block with numbered sources and tags", async () => {
@@ -127,6 +127,32 @@ describe("RagPipeline", () => {
             expect(userMessage).toContain("[1] (tags: a, b)\nFirst doc");
             expect(userMessage).toContain("[2] (tags: c)\nSecond doc");
             expect(userMessage).toContain("Question: question");
+        });
+
+        it("includes title in the context block when present", async () => {
+            mockQueryPieces.mockResolvedValueOnce([
+                {
+                    piece: {
+                        id: "1",
+                        title: "TypeScript overview",
+                        content: "TypeScript is typed JS",
+                        tags: ["ts"],
+                    },
+                    score: 0.9,
+                },
+            ]);
+            mockChat.mockResolvedValueOnce({
+                message: { content: "answer" },
+            });
+
+            await rag.query("question");
+
+            const chatCall = mockChat.mock.calls[0][0];
+            const userMessage = chatCall.messages[1].content;
+
+            expect(userMessage).toContain(
+                "[1] TypeScript overview (tags: ts)\nTypeScript is typed JS",
+            );
         });
 
         it("formats source with empty tags correctly", async () => {
