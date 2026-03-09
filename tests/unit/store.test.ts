@@ -817,6 +817,37 @@ describe("PieceStore", () => {
                 expect(results[0].score).not.toBe(0.8);
             });
 
+            it("does not grant keyword fusion credit to documents with zero keyword overlap", async () => {
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2"]],
+                    documents: [["No overlap here", "Another unrelated document"]],
+                    metadatas: [[{ tags: [] }, { tags: [] }]],
+                    distances: [[0.2, 0.4]],
+                });
+
+                const semanticResults = await store.queryPieces("TypeScript", {
+                    topK: 2,
+                });
+
+                mockQuery.mockResolvedValueOnce({
+                    ids: [["id-1", "id-2"]],
+                    documents: [["No overlap here", "Another unrelated document"]],
+                    metadatas: [[{ tags: [] }, { tags: [] }]],
+                    distances: [[0.2, 0.4]],
+                });
+
+                const hybridResults = await store.queryPieces("TypeScript", {
+                    topK: 2,
+                    useHybridSearch: true,
+                });
+
+                expect(hybridResults.map((result) => result.piece.id)).toEqual(
+                    semanticResults.map((result) => result.piece.id),
+                );
+                expect(hybridResults[0].score).toBeCloseTo(1 / 61, 10);
+                expect(hybridResults[1].score).toBeCloseTo(1 / 62, 10);
+            });
+
             it("includes title in keyword matching", async () => {
                 mockQuery.mockResolvedValueOnce({
                     ids: [["id-1", "id-2"]],

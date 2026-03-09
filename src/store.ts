@@ -292,6 +292,7 @@ export class PieceStore {
                     toEmbeddingText(r.piece.content, r.piece.title),
                 ),
             }))
+            .filter((r) => r.score > 0)
             .sort((a, b) => b.score - a.score);
 
         const fused = reciprocalRankFusion(

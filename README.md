@@ -72,7 +72,7 @@ npm install
 
 ```bash
 npm run build
-npx -y @danielzfliu/memory
+node ./dist/main.js
 ```
 
 Memory MCP communicates over stdio, so it does not bind an HTTP port.
@@ -359,25 +359,4 @@ Environment variables with the names above can override these defaults at runtim
 npm test              # run all tests
 npm run test:watch    # watch mode
 npm run test:coverage # with coverage report
-```
-
-## Project Structure
-
-```
-src/
-├── types.ts        # Interfaces (MemoryConfig, Piece, QueryResult, etc.)
-├── config.ts       # Default config values and config resolution
-├── embeddings.ts   # Ollama embedding client
-├── store.ts        # PieceStore — CRUD + semantic search + tag filtering
-├── rag.ts          # RAG pipeline — retrieve → prompt → generate
-├── mcp.ts          # MCP server (stdio) + tool handlers
-├── server.ts       # Express REST API (app factory)
-├── http-main.ts    # HTTP server entry point (starts listening)
-├── main.ts         # MCP entry point (stdio)
-└── index.ts        # Library entry point (public exports)
-tests/
-├── helpers/        # Shared test fixtures (in-memory ChromaDB mock, etc.)
-├── unit/           # Unit tests (embeddings, store, rag)
-├── manual/         # Manual api tests (used by ai agents with access to terminal)
-└── integration/    # API integration tests (supertest)
 ```
