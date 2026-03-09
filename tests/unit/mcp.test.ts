@@ -10,6 +10,8 @@ const mockUpdatePiece = vi.fn();
 const mockDeletePiece = vi.fn();
 const mockQueryPieces = vi.fn();
 const mockRagQuery = vi.fn();
+const mockListCollections = vi.fn();
+const mockDeleteCollection = vi.fn();
 
 vi.mock("../../src/store", () => ({
     PieceStore: class MockPieceStore {
@@ -19,6 +21,8 @@ vi.mock("../../src/store", () => ({
         updatePiece = mockUpdatePiece;
         deletePiece = mockDeletePiece;
         queryPieces = mockQueryPieces;
+        listCollections = mockListCollections;
+        deleteCollection = mockDeleteCollection;
     },
 }));
 
@@ -49,6 +53,8 @@ describe("MemoryMcpServer", () => {
         mockDeletePiece.mockResolvedValue(undefined);
         mockQueryPieces.mockResolvedValue([]);
         mockRagQuery.mockResolvedValue({ answer: "No context", sources: [] });
+        mockListCollections.mockResolvedValue(["pieces"]);
+        mockDeleteCollection.mockResolvedValue(undefined);
 
         server = new MemoryMcpServer({});
         client = new Client({ name: "test-client", version: "1.0.0" });
@@ -87,6 +93,8 @@ describe("MemoryMcpServer", () => {
             "delete_piece",
             "query_pieces",
             "rag_query",
+            "list_collections",
+            "delete_collection",
         ]);
     });
 
@@ -101,7 +109,7 @@ describe("MemoryMcpServer", () => {
         });
 
         expect(mockInit).toHaveBeenCalledTimes(1);
-        expect(mockAddPiece).toHaveBeenCalledWith("hello", ["tag-1"], "Greeting");
+        expect(mockAddPiece).toHaveBeenCalledWith("hello", ["tag-1"], "Greeting", undefined);
 
         expect(result.isError).toBeFalsy();
         const content = result.content as Array<{ type: string; text: string }>;
@@ -140,7 +148,8 @@ describe("MemoryMcpServer", () => {
         expect(mockQueryPieces).toHaveBeenCalledWith("hello", {
             tags: undefined,
             topK: 3,
-        });
+            useHybridSearch: undefined,
+        }, undefined);
     });
 
     it("passes null title through update_piece to clear existing title", async () => {
@@ -155,7 +164,66 @@ describe("MemoryMcpServer", () => {
             undefined,
             undefined,
             null,
+            undefined,
         );
+    });
+
+    it("passes collection param to add_piece", async () => {
+        const result = await client.callTool({
+            name: "add_piece",
+            arguments: { content: "hello", tags: ["tag-1"], collection: "agent-alice" },
+        });
+
+        expect(mockAddPiece).toHaveBeenCalledWith("hello", ["tag-1"], undefined, "agent-alice");
+        expect(result.isError).toBeFalsy();
+    });
+
+    it("passes collection param to query_pieces", async () => {
+        mockQueryPieces.mockResolvedValueOnce([]);
+
+        await client.callTool({
+            name: "query_pieces",
+            arguments: { query: "test", collection: "agent-alice" },
+        });
+
+        expect(mockQueryPieces).toHaveBeenCalledWith(
+            "test",
+            { tags: undefined, topK: undefined, useHybridSearch: undefined },
+            "agent-alice",
+        );
+    });
+
+    it("calls list_collections and returns collection names", async () => {
+        mockListCollections.mockResolvedValueOnce(["pieces", "agent-alice"]);
+
+        const result = await client.callTool({
+            name: "list_collections",
+            arguments: {},
+        });
+
+        expect(mockInit).toHaveBeenCalledTimes(1);
+        expect(mockListCollections).toHaveBeenCalledTimes(1);
+        expect(result.isError).toBeFalsy();
+        const content = result.content as Array<{ type: string; text: string }>;
+        expect(JSON.parse(content[0].text)).toEqual({
+            collections: ["pieces", "agent-alice"],
+        });
+    });
+
+    it("calls delete_collection and returns confirmation", async () => {
+        const result = await client.callTool({
+            name: "delete_collection",
+            arguments: { collection: "agent-alice" },
+        });
+
+        expect(mockInit).toHaveBeenCalledTimes(1);
+        expect(mockDeleteCollection).toHaveBeenCalledWith("agent-alice");
+        expect(result.isError).toBeFalsy();
+        const content = result.content as Array<{ type: string; text: string }>;
+        expect(JSON.parse(content[0].text)).toEqual({
+            deleted: true,
+            collection: "agent-alice",
+        });
     });
 
     it("returns an error for unknown tools", async () => {

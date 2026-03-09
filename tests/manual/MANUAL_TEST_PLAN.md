@@ -23,6 +23,7 @@
 - **npm install:** Run `npm install` (do **not** use `--no-optional` — esbuild requires its platform-specific optional dependency). If you have a `package-lock.json` present, `npm ci` is faster and fully non-interactive. These commands DO terminate and can be run blocking.
 - **Avoid interactive prompts:** Never pipe into a command that might request confirmation. If a command could prompt (e.g., `ollama pull`), ensure the model is already available before running the test plan.
 - **Timeouts:** Set reasonable timeouts on HTTP requests. RAG queries (§6) may take 10–60 seconds. Use `Invoke-RestMethod -TimeoutSec 120` if needed.
+- **Execution mode:** Choose one mode before testing and use it consistently. Local mode uses `npm run dev:http` plus separately managed ChromaDB/Ollama. Docker mode uses `npm run docker:up` for `memory-api` + `chromadb`, while Ollama continues running on the host at `http://localhost:11434`.
 - **Stopping the server (§8):** Use `Stop-Process` to kill the Node.js process (see §8 for details). Do NOT send Ctrl+C interactively — an AI agent cannot do this reliably.
 
 ---
@@ -36,7 +37,7 @@ Before any functional testing, verify the environment is ready.
 | 0.1 | Node.js ≥ 18 installed | Version string ≥ 18.x | `node --version` |
 | 0.2 | npm dependencies installed | Exit code 0, `node_modules/` exists | `npm install` in project root (blocking — terminates on its own) |
 | 0.3 | Ollama is reachable | JSON response with models list | `Invoke-RestMethod http://localhost:11434/api/tags` |
-| 0.4 | Embedding model available | `nomic-embed-text:latest` listed | Check the response from 0.3 for the model name |
+| 0.4 | Embedding model available | `nomic-embed-text-v2-moe:latest` listed | Check the response from 0.3 for the model name |
 | 0.5 | Generation model available | `gemma3:latest` listed | Check the response from 0.3 for the model name |
 | 0.6 | ChromaDB is reachable | JSON heartbeat response | `Invoke-RestMethod http://localhost:8000/api/v2/heartbeat` (note: v1 API is deprecated in ChromaDB ≥ 1.x) |
 | 0.7 | ChromaDB and npm client versions are compatible | No version mismatch errors | Server: `docker exec <container> pip show chromadb` (if Docker) or `pip show chromadb` (if pip). Client: `node -e "console.log(require('chromadb/package.json').version)"`. Major versions should match. |
@@ -49,10 +50,10 @@ Before any functional testing, verify the environment is ready.
 
 | # | Step | Expected |
 |---|------|----------|
-| 1.1 | Run `npm run dev:http` as a **non-blocking/background** command. Do NOT wait for it to exit — it is a long-running process. Wait ~5 seconds after launch. | Console output includes `Memory RAG server running on http://localhost:3000` |
+| 1.1 | Start the server using your chosen execution mode. Local mode: run `npm run dev:http` as a **non-blocking/background** command. Docker mode: run `npm run docker:up` (blocking is fine; it terminates after the containers are started). Wait ~5 seconds after startup. | Local mode prints `Memory RAG server running on http://localhost:3000`. Docker mode shows `memory-api` and `chromadb` running, and the API responds on `http://localhost:3000`. |
 | 1.2 | Smoke-check server: `Invoke-RestMethod http://localhost:3000/pieces/nonexistent-id` (expect an error response) | Returns JSON with `"error"` field; HTTP 404 status. In PowerShell, `Invoke-RestMethod` throws on non-2xx — wrap in `try/catch` or use `Invoke-WebRequest` and inspect `StatusCode`. |
 
-> **AI agent tip:** For step 1.1, launch the server non-blocking and do not wait for the process to complete. After a brief delay, proceed to step 1.2 to confirm it started.
+> **AI agent tip:** In local mode, launch the server non-blocking and do not wait for the process to complete. In Docker mode, wait for `docker compose` to finish starting containers, then proceed to step 1.2.
 
 Keep the server running for all subsequent sections.
 
@@ -122,16 +123,17 @@ All seed data:
 | 2.3.3 | `PUT /pieces/{ID_1}` with `{"title": "TypeScript summary"}` | 200, title updated and content preserved |
 | 2.3.4 | `PUT /pieces/{ID_1}` with `{"title": null}` | 200, title is cleared |
 | 2.3.5 | `PUT /pieces/{ID_1}` with `{"title": "TypeScript overview"}` | 200, title is restored for later title-based retrieval tests |
-| 2.3.6 | `PUT /pieces/{ID_1}` with only `{"tags": ["typescript"]}` (no content field) | 200, content unchanged from 2.3.1, tags updated |
+| 2.3.6 | `PUT /pieces/{ID_1}` with only `{"tags": ["typescript", "programming"]}` (no content field) | 200, content unchanged from 2.3.1, tags updated |
 | 2.3.7 | `PUT /pieces/does-not-exist-abc` with `{"content": "x"}` | 404 |
 
 ### 2.4 — Delete Pieces
 
 | # | Step | Expected |
 |---|------|----------|
-| 2.4.1 | `DELETE /pieces/{ID_5}` | 204, empty body |
-| 2.4.2 | `GET /pieces/{ID_5}` after delete | 404 |
-| 2.4.3 | `DELETE /pieces/{ID_5}` again (already deleted) | Should not return 500 (204 or 404 acceptable) |
+| 2.4.1 | Create a temporary throwaway piece with `POST /pieces` and save the returned id as `ID_DEL` | 201, response body includes a valid `id` |
+| 2.4.2 | `DELETE /pieces/{ID_DEL}` | 204, empty body |
+| 2.4.3 | `GET /pieces/{ID_DEL}` after delete | 404 |
+| 2.4.4 | `DELETE /pieces/{ID_DEL}` again (already deleted) | Should not return 500 (204 or 404 acceptable) |
 
 ---
 
@@ -155,7 +157,7 @@ Test that the API rejects malformed requests gracefully.
 
 > **Key evaluation:** An AI tester can and should **judge whether the ranking makes semantic sense**.
 
-Use `POST /query` with `topK: 4` (we have 4 remaining pieces after the delete in §2.4).
+Use `POST /query` with `topK: 5` so all seed pieces remain eligible for ranking checks.
 
 | # | Query | Expected Top Result (by content relevance) | Evaluation Criteria |
 |---|-------|---------------------------------------------|---------------------|
@@ -167,7 +169,7 @@ Use `POST /query` with `topK: 4` (we have 4 remaining pieces after the delete in
 
 **For each query, verify:**
 - Response is a JSON array.
-- Each element has `piece` (with `id`, `content`, `tags`) and `score` (number between 0 and 1).
+- Each element has `piece` (with `id`, `content`, `tags`) and `score` (a numeric relevance score where higher is better).
 - The ranking order is defensible — briefly explain why the top result is or isn't correct.
 - Scores decrease monotonically (or at least non-increasing).
 
@@ -241,40 +243,123 @@ Use `POST /rag`.
 | 7.7 | Query with very long query | `POST /query` with query = 1000+ characters | 200, no crash |
 | 7.8 | RAG with topK: 0 | `POST /rag` with `{"query": "test", "topK": 0}` | 400 validation error because `topK` must be a positive integer |
 | 7.9 | RAG with topK: 1 | `POST /rag` with `{"query": "TypeScript", "topK": 1}` | Exactly 1 source returned |
-| 7.10 | RAG with tag filter returning no matches | `POST /rag` with `{"query": "test", "tags": ["nonexistent-tag"]}` | Should return empty sources with fixed "not enough context" message. LLM must NOT be called, no hallucination. |
+| 7.10 | RAG with tag filter returning no matches | `POST /rag` with `{"query": "test", "tags": ["nonexistent-tag"]}` | Should return empty sources with an insufficient-context message and no hallucinated answer content. |
 
 **Clean up** any pieces created in this section by deleting them afterwards.
 
 ---
 
-## 8 — Data Integrity After Restart
+## 8 — Multi-Collection Isolation
+
+> **Key evaluation:** Verify that different agents (collections) have fully isolated data stores.
+
+### 8.1 — Create pieces in separate collections
+
+Create pieces in two different collections. Example PowerShell:
+
+```powershell
+# Default collection (no collection param)
+Invoke-RestMethod -Uri http://localhost:3000/pieces -Method POST `
+  -ContentType "application/json" `
+  -Body '{"content": "Default collection piece about TypeScript.", "tags": ["typescript"]}'
+
+# Agent-alice collection
+Invoke-RestMethod -Uri http://localhost:3000/pieces -Method POST `
+  -ContentType "application/json" `
+  -Body '{"content": "Alice knows about Python for data science.", "tags": ["python"], "collection": "agent-alice"}'
+
+# Agent-bob collection
+Invoke-RestMethod -Uri http://localhost:3000/pieces -Method POST `
+  -ContentType "application/json" `
+  -Body '{"content": "Bob is learning about Rust systems programming.", "tags": ["rust"], "collection": "agent-bob"}'
+```
+
+Save the returned IDs as `ID_DEFAULT`, `ID_ALICE`, `ID_BOB`.
+
+| Check | Expected |
+|-------|----------|
+| Each request returns 201 | Yes |
+| Each response has a unique `id` | Yes |
+
+### 8.2 — Verify read isolation
 
 | # | Step | Expected |
 |---|------|----------|
-| 8.1 | Stop the server. Find the Node.js process: `Get-Process -Name node -ErrorAction SilentlyContinue` then kill it: `Stop-Process -Name node -Force`. Alternatively, if you launched `npm run dev` in a trackable way, kill by PID. | Server stops; port 3000 is freed |
-| 8.2 | Restart the server with `npm run dev:http` (**non-blocking**, same as §1.1). Wait ~5 seconds. | Starts successfully, console shows listening message |
-| 8.3 | `Invoke-RestMethod http://localhost:3000/pieces/{ID_1}` | Still returns the piece from §2 — data persisted in ChromaDB |
-| 8.4 | `Invoke-RestMethod -Uri http://localhost:3000/query -Method POST -ContentType "application/json" -Body '{"query": "TypeScript"}'` | Returns results including ID_1 — search still works |
+| 8.2.1 | `GET /pieces/{ID_DEFAULT}` (no collection param) | 200, returns the TypeScript piece |
+| 8.2.2 | `GET /pieces/{ID_ALICE}?collection=agent-alice` | 200, returns Alice's Python piece |
+| 8.2.3 | `GET /pieces/{ID_ALICE}` (no collection param — wrong collection) | 404, piece not found in default collection |
+| 8.2.4 | `GET /pieces/{ID_DEFAULT}?collection=agent-alice` | 404, piece not found in Alice's collection |
 
-> **AI agent tip:** Stopping the server requires killing the process. Do NOT attempt to send Ctrl+C — use `Stop-Process` as shown above. After stopping, verify port 3000 is free before restarting: `Test-NetConnection -ComputerName localhost -Port 3000` should fail.
+### 8.3 — Verify search isolation
+
+| # | Step | Expected |
+|---|------|----------|
+| 8.3.1 | `POST /query` with `{"query": "programming", "topK": 10}` | Returns only the default collection piece (TypeScript) |
+| 8.3.2 | `POST /query` with `{"query": "programming", "topK": 10, "collection": "agent-alice"}` | Returns only Alice's piece (Python) |
+| 8.3.3 | `POST /query` with `{"query": "programming", "topK": 10, "collection": "agent-bob"}` | Returns only Bob's piece (Rust) |
+
+### 8.4 — Verify RAG isolation
+
+| # | Step | Expected |
+|---|------|----------|
+| 8.4.1 | `POST /rag` with `{"query": "What programming language?", "topK": 5, "collection": "agent-alice"}` | Answer references Python only; sources contain only Alice's piece |
+| 8.4.2 | `POST /rag` with `{"query": "What programming language?", "topK": 5, "collection": "agent-bob"}` | Answer references Rust only; sources contain only Bob's piece |
+
+### 8.5 — List collections
+
+| # | Step | Expected |
+|---|------|----------|
+| 8.5.1 | `GET /collections` | 200, response body `{"collections": [...]}` contains at least `"pieces"`, `"agent-alice"`, `"agent-bob"` |
+
+### 8.6 — Delete a collection
+
+| # | Step | Expected |
+|---|------|----------|
+| 8.6.1 | `DELETE /collections/agent-bob` | 204 |
+| 8.6.2 | `GET /collections` | `agent-bob` no longer in the list |
+| 8.6.3 | `POST /query` with `{"query": "Rust", "topK": 5, "collection": "agent-bob"}` | Returns empty results (collection was deleted and recreated empty) |
+
+### 8.7 — Update and delete pieces in a specific collection
+
+| # | Step | Expected |
+|---|------|----------|
+| 8.7.1 | `PUT /pieces/{ID_ALICE}` with `{"content": "Alice now knows about ML too.", "collection": "agent-alice"}` | 200, content updated |
+| 8.7.2 | `GET /pieces/{ID_ALICE}?collection=agent-alice` | 200, content reflects update |
+| 8.7.3 | `DELETE /pieces/{ID_ALICE}?collection=agent-alice` | 204 |
+| 8.7.4 | `GET /pieces/{ID_ALICE}?collection=agent-alice` | 404 |
+
+**Clean up:** Delete any remaining test collections with `DELETE /collections/agent-alice`.
 
 ---
 
-## 9 — Error Resilience (Optional)
+## 9 — Data Integrity After Restart
+
+| # | Step | Expected |
+|---|------|----------|
+| 9.1 | Stop the server using the same execution mode from §1. Local mode: find the Node.js process with `Get-Process -Name node -ErrorAction SilentlyContinue` then kill it with `Stop-Process -Name node -Force` (or by PID). | API stops and then becomes reachable again after restart |
+| 9.2 | Restart the server in local mode with `npm run dev:http` (**non-blocking**, same as §1.1). | Starts successfully and responds on `http://localhost:3000` |
+| 9.3 | `Invoke-RestMethod http://localhost:3000/pieces/{ID_1}` | Still returns the piece from §2 — data persisted in ChromaDB |
+| 9.4 | `Invoke-RestMethod -Uri http://localhost:3000/query -Method POST -ContentType "application/json" -Body '{"query": "TypeScript"}'` | Returns results including ID_1 — search still works |
+
+> **AI agent tip:** In local mode, stopping the server requires killing the process. Do NOT attempt to send Ctrl+C — use `Stop-Process` as shown above. In Docker mode, prefer `docker compose restart memory-api` so ChromaDB stays up and persistence is exercised cleanly.
+
+---
+
+## 10 — Error Resilience (Optional)
 
 > Only run these if you can safely stop/start infrastructure services.
 
 | # | Scenario | How to Simulate | Expected Server Behavior |
 |---|----------|-----------------|--------------------------|
-| 9.1 | ChromaDB is down at startup | Stop ChromaDB (Docker: `docker stop <container>`; pip: `Stop-Process -Name chroma -Force`), then send any request to the Memory server | 503 with `"Failed to connect to ChromaDB"` |
-| 9.2 | ChromaDB goes down mid-operation | Stop ChromaDB after Memory server is running, then `Invoke-RestMethod -Uri http://localhost:3000/pieces -Method POST -ContentType "application/json" -Body '{"content": "test"}'` | 500 with error message (not a raw crash) |
-| 9.3 | Ollama is down | Stop Ollama (`Stop-Process -Name ollama -Force`), then `Invoke-RestMethod -Uri http://localhost:3000/query -Method POST -ContentType "application/json" -Body '{"query": "test"}'` | 500 with error message (not a raw crash) |
+| 10.1 | ChromaDB is down at startup | Stop ChromaDB (Docker: `docker stop <container>`; pip: `Stop-Process -Name chroma -Force`), then send any request to the Memory server | 503 with `"Failed to connect to ChromaDB"` |
+| 10.2 | ChromaDB goes down mid-operation | Stop ChromaDB after Memory server is running, then `Invoke-RestMethod -Uri http://localhost:3000/pieces -Method POST -ContentType "application/json" -Body '{"content": "test"}'` | 500 with error message (not a raw crash) |
+| 10.3 | Ollama is down | Stop Ollama (`Stop-Process -Name ollama -Force`), then `Invoke-RestMethod -Uri http://localhost:3000/query -Method POST -ContentType "application/json" -Body '{"query": "test"}'` | 500 with error message (not a raw crash) |
 
 > **After testing**, restart any stopped services before continuing. Docker: `docker start <container>`. Ollama: launch `ollama serve` (non-blocking — it is a long-running process).
 
 ---
 
-## 10 — Test Report Template
+## 11 — Test Report Template
 
 After executing all sections, produce a report in the following format:
 
@@ -301,8 +386,9 @@ After executing all sections, produce a report in the following format:
 | 5 — Tag Filtering | | | | |
 | 6 — RAG Generation Quality | | | | |
 | 7 — Edge Cases | | | | |
-| 8 — Data Integrity After Restart | | | | |
-| 9 — Error Resilience | | | | |
+| 8 — Multi-Collection Isolation | | | | |
+| 9 — Data Integrity After Restart | | | | |
+| 10 — Error Resilience | | | | |
 | **Total** | | | | |
 
 ## Overall Verdict: [PASS / FAIL / CONDITIONAL PASS]

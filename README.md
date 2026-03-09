@@ -14,17 +14,45 @@ Three ways to use Memory:
 
 ## Prerequisites
 
-- Node.js ≥ 18
-- Ollama running locally ([install](https://ollama.com))
-- ChromaDB server running locally
+- **Node.js** ≥ 18
+- **Ollama** running locally
+- **ChromaDB** server running locally
 
-Note: To access `chroma run`, run `pip install chromadb`, then add Python's Scripts folder to PATH. Or you know, use docker.
+### Setting up Ollama
 
-If you use the default models, pull:
+Install Ollama ([install](https://ollama.com)) and pull the default models:
+
 ```bash
-ollama pull nomic-embed-text:latest
+ollama pull nomic-embed-text-v2-moe:latest
 ollama pull gemma3:latest
 ```
+
+Then run:
+```bash
+npm run ollama                     # start Ollama on default port 11434
+npm run ollama:port -- 11435       # start Ollama on a custom port
+```
+
+### Setting up ChromaDB
+
+**Option 1: Docker**
+
+The repo includes a Docker Compose file that runs ChromaDB and stores its data in `./chroma/`.
+
+```bash
+npm run docker:up       # start ChromaDB on port 8000
+npm run docker:logs     # view logs
+npm run docker:down     # stop ChromaDB
+```
+
+**Option 2: pip**
+
+```bash
+pip install chromadb
+chroma run --port 8000  # start ChromaDB on port 8000
+```
+
+Note: You may need to add Python's Scripts folder to your PATH after installing.
 
 ---
 
@@ -40,22 +68,9 @@ cd memory
 npm install
 ```
 
-### 2. Start external services
-
-The repo includes convenience scripts for starting Ollama and ChromaDB:
+### 2. Build and run the MCP server
 
 ```bash
-npm run ollama                     # start Ollama on default port 11434
-npm run ollama:port -- 11435       # start Ollama on a custom port
-
-npm run db                         # start ChromaDB on default port 8000
-npm run db:port -- 9000            # start ChromaDB on a custom port
-```
-
-### 3. Build and run the MCP server
-
-```bash
-npm install
 npm run build
 npx -y @danielzfliu/memory
 ```
@@ -100,6 +115,10 @@ If you are running from a local clone instead of npm:
 | `delete_piece` | Delete a piece by id |
 | `query_pieces` | Semantic search over content, plus title when present. Supports hybrid search (vector + keyword via RRF). |
 | `rag_query` | Retrieve + generate answer with citations using content and title context. Supports hybrid search. |
+| `list_collections` | List all collection names in the memory store |
+| `delete_collection` | Delete an entire collection and all its pieces |
+
+All piece-level tools accept an optional `collection` parameter to target a specific collection instead of the default. This allows multiple agents to use isolated memory stores.
 
 ---
 
@@ -113,16 +132,7 @@ Use this option to integrate Memory into your own Node.js/TypeScript project.
 npm install @danielzfliu/memory
 ```
 
-### 2. Start external services
-
-You are responsible for running Ollama and ChromaDB yourself:
-
-```bash
-ollama serve                       # default port 11434
-chroma run --port 8000             # default port 8000
-```
-
-### 3. Programmatic usage
+### 2. Programmatic usage
 
 #### Using PieceStore and RagPipeline directly
 
@@ -133,7 +143,7 @@ async function main() {
     const config: MemoryConfig = {
         chromaUrl: "http://localhost:8000",
         ollamaUrl: "http://localhost:11434",
-        embeddingModel: "nomic-embed-text:latest",
+        embeddingModel: "nomic-embed-text-v2-moe:latest",
     };
 
     // Store: CRUD + semantic search
@@ -209,19 +219,7 @@ cd memory
 npm install
 ```
 
-### 2. Start external services
-
-The repo includes convenience scripts for starting Ollama and ChromaDB:
-
-```bash
-npm run ollama                     # start Ollama on default port 11434
-npm run ollama:port -- 11435       # start Ollama on a custom port
-
-npm run db                         # start ChromaDB on default port 8000
-npm run db:port -- 9000            # start ChromaDB on a custom port
-```
-
-### 3. Start the REST server
+### 2. Start the REST server
 
 ```bash
 npm run dev:http
@@ -238,9 +236,17 @@ curl -X POST http://localhost:3000/pieces \
   -d '{"title": "TypeScript overview", "content": "TypeScript is a typed superset of JavaScript.", "tags": ["typescript", "programming"]}'
 ```
 
+With a specific collection:
+```bash
+curl -X POST http://localhost:3000/pieces \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Agent-specific memory.", "tags": ["agent"], "collection": "agent-alice"}'
+```
+
 #### Get a piece by ID
 ```bash
 curl http://localhost:3000/pieces/<id>
+curl http://localhost:3000/pieces/<id>?collection=agent-alice
 ```
 
 #### Update a piece
@@ -255,6 +261,7 @@ Set `title` to `null` to clear it.
 #### Delete a piece
 ```bash
 curl -X DELETE http://localhost:3000/pieces/<id>
+curl -X DELETE http://localhost:3000/pieces/<id>?collection=agent-alice
 ```
 
 #### Semantic search
@@ -298,6 +305,18 @@ Returns:
 }
 ```
 
+#### List collections
+```bash
+curl http://localhost:3000/collections
+```
+
+#### Delete a collection
+```bash
+curl -X DELETE http://localhost:3000/collections/agent-alice
+```
+
+> **Multi-collection:** All piece and query endpoints accept an optional `collection` parameter (in the request body for POST/PUT, as a query string for GET/DELETE) to target a specific collection. Omitting it uses the default collection.
+
 ---
 
 ## Exports
@@ -326,11 +345,13 @@ All fields are optional. Defaults are applied automatically.
 |--------|---------|-------------|
 | `chromaUrl` | `http://localhost:8000` | ChromaDB server URL |
 | `ollamaUrl` | `http://localhost:11434` | Ollama server URL |
-| `embeddingModel` | `nomic-embed-text:latest` | Ollama model for embeddings |
+| `embeddingModel` | `nomic-embed-text-v2-moe:latest` | Ollama model for embeddings |
 | `generationModel` | `gemma3:latest` | Ollama model for RAG generation |
 | `collectionName` | `pieces` | ChromaDB collection name |
 
 > **Note:** `generationModel` is used by `createServer` and `MemoryMcpServer`. When constructing `RagPipeline` directly, you pass the model name to its constructor.
+
+Environment variables with the names above can override these defaults at runtime.
 
 ## Testing
 

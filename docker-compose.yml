@@ -1,0 +1,9 @@
+services:
+  chromadb:
+    image: chromadb/chroma:1.5.3
+    container_name: memory-chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma:/data

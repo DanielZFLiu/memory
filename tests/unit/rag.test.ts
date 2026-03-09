@@ -93,7 +93,7 @@ describe("RagPipeline", () => {
             expect(mockQueryPieces).toHaveBeenCalledWith("test", {
                 tags: ["python"],
                 topK: 3,
-            });
+            }, undefined);
         });
 
         it("passes default empty options to store.queryPieces", async () => {
@@ -101,7 +101,7 @@ describe("RagPipeline", () => {
 
             await rag.query("test");
 
-            expect(mockQueryPieces).toHaveBeenCalledWith("test", {});
+            expect(mockQueryPieces).toHaveBeenCalledWith("test", {}, undefined);
         });
 
         it("builds context block with numbered sources and tags", async () => {

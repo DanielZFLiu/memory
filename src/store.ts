@@ -13,12 +13,19 @@ import { resolveConfig } from "./config";
 type ChromaMetadataValue = string | number | boolean;
 type ChromaMetadata = Record<string, ChromaMetadataValue>;
 
+function toTagMetadataKey(tag: string): string {
+    return `tag_${Buffer.from(tag, "utf8").toString("base64url")}`;
+}
+
 function toChromaMetadata(tags: string[], title?: string): ChromaMetadata {
     const normalizedTags = normalizeTags(tags);
     const normalizedTitle = normalizeTitle(title);
 
     return {
         tags: JSON.stringify(normalizedTags),
+        ...Object.fromEntries(
+            normalizedTags.map((tag) => [toTagMetadataKey(tag), true]),
+        ),
         ...(normalizedTitle !== undefined ? { title: normalizedTitle } : {}),
     };
 }
@@ -56,10 +63,27 @@ function toEmbeddingText(content: string, title?: string): string {
     return title ? `${title}\n\n${content}` : content;
 }
 
+function buildTagWhereClause(tags: string[]): Record<string, unknown> | undefined {
+    if (tags.length === 0) {
+        return undefined;
+    }
+
+    if (tags.length === 1) {
+        return { [toTagMetadataKey(tags[0])]: true };
+    }
+
+    return {
+        $and: tags.map((tag) => ({
+            [toTagMetadataKey(tag)]: true,
+        })),
+    };
+}
+
 export class PieceStore {
     private readonly chromaClient: ChromaClient;
     private readonly embeddingClient: EmbeddingClient;
-    private collection: Collection | null = null;
+    private readonly collectionCache: Map<string, Collection> = new Map();
+    private initialized = false;
     private readonly config: Required<MemoryConfig>;
 
     constructor(config: MemoryConfig = {}) {
@@ -72,27 +96,53 @@ export class PieceStore {
     }
 
     async init(): Promise<void> {
-        this.collection = await this.chromaClient.getOrCreateCollection({
+        const collection = await this.chromaClient.getOrCreateCollection({
             name: this.config.collectionName,
             metadata: { "hnsw:space": "cosine" },
         });
+        this.collectionCache.set(this.config.collectionName, collection);
+        this.initialized = true;
     }
 
-    private getCollection(): Collection {
-        if (!this.collection) {
+    private async resolveCollection(name?: string): Promise<Collection> {
+        if (!this.initialized) {
             throw new Error("PieceStore not initialized. Call init() first.");
         }
-        return this.collection;
+        const collectionName = name ?? this.config.collectionName;
+        let collection = this.collectionCache.get(collectionName);
+        if (!collection) {
+            collection = await this.chromaClient.getOrCreateCollection({
+                name: collectionName,
+                metadata: { "hnsw:space": "cosine" },
+            });
+            this.collectionCache.set(collectionName, collection);
+        }
+        return collection;
     }
 
-    async addPiece(content: string, tags: string[], title?: string): Promise<Piece> {
-        const collection = this.getCollection();
+    async listCollections(): Promise<string[]> {
+        if (!this.initialized) {
+            throw new Error("PieceStore not initialized. Call init() first.");
+        }
+        return this.chromaClient.listCollections();
+    }
+
+    async deleteCollection(name: string): Promise<void> {
+        if (!this.initialized) {
+            throw new Error("PieceStore not initialized. Call init() first.");
+        }
+        await this.chromaClient.deleteCollection({ name });
+        this.collectionCache.delete(name);
+    }
+
+    async addPiece(content: string, tags: string[], title?: string, collection?: string): Promise<Piece> {
+        const col = await this.resolveCollection(collection);
         const id = uuidv4();
         const embedding = await this.embeddingClient.embed(
             toEmbeddingText(content, title),
         );
 
-        await collection.add({
+        await col.add({
             ids: [id],
             embeddings: [embedding],
             documents: [content],
@@ -107,9 +157,9 @@ export class PieceStore {
         };
     }
 
-    async getPiece(id: string): Promise<Piece | null> {
-        const collection = this.getCollection();
-        const result = await collection.get({
+    async getPiece(id: string, collection?: string): Promise<Piece | null> {
+        const col = await this.resolveCollection(collection);
+        const result = await col.get({
             ids: [id],
             include: [IncludeEnum.Documents, IncludeEnum.Metadatas],
         });
@@ -126,9 +176,9 @@ export class PieceStore {
         };
     }
 
-    async deletePiece(id: string): Promise<void> {
-        const collection = this.getCollection();
-        await collection.delete({ ids: [id] });
+    async deletePiece(id: string, collection?: string): Promise<void> {
+        const col = await this.resolveCollection(collection);
+        await col.delete({ ids: [id] });
     }
 
     async updatePiece(
@@ -136,9 +186,10 @@ export class PieceStore {
         content?: string,
         tags?: string[],
         title?: string | null,
+        collection?: string,
     ): Promise<Piece | null> {
-        const collection = this.getCollection();
-        const existing = await this.getPiece(id);
+        const col = await this.resolveCollection(collection);
+        const existing = await this.getPiece(id, collection);
         if (!existing) return null;
 
         const newContent = content ?? existing.content;
@@ -167,7 +218,7 @@ export class PieceStore {
             ];
         }
 
-        await collection.update(updateData);
+        await col.update(updateData);
 
         return {
             id,
@@ -180,28 +231,18 @@ export class PieceStore {
     async queryPieces(
         query: string,
         options: QueryOptions = {},
+        collection?: string,
     ): Promise<QueryResult[]> {
-        const collection = this.getCollection();
+        const col = await this.resolveCollection(collection);
         const { tags, topK = 10, useHybridSearch = false } = options;
 
         const queryEmbedding = await this.embeddingClient.embed(query);
 
-        let whereClause: Record<string, unknown> | undefined;
-        if (tags && tags.length > 0) {
-            if (tags.length === 1) {
-                whereClause = { tags: { $contains: tags[0] } };
-            } else {
-                whereClause = {
-                    $and: tags.map((tag) => ({
-                        tags: { $contains: tag },
-                    })),
-                };
-            }
-        }
+        const whereClause = buildTagWhereClause(tags ?? []);
 
         const fetchK = useHybridSearch ? topK * 3 : topK;
 
-        const results = await collection.query({
+        const results = await col.query({
             queryEmbeddings: [queryEmbedding],
             nResults: fetchK,
             where: whereClause,

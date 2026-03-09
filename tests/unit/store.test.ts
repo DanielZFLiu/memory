@@ -6,6 +6,8 @@ const mockDelete = vi.fn();
 const mockUpdate = vi.fn();
 const mockQuery = vi.fn();
 
+const tagKey = (tag: string) => `tag_${Buffer.from(tag, "utf8").toString("base64url")}`;
+
 const mockCollection = {
     add: mockAdd,
     get: mockGet,
@@ -15,10 +17,14 @@ const mockCollection = {
 };
 
 const mockGetOrCreateCollection = vi.fn().mockResolvedValue(mockCollection);
+const mockListCollections = vi.fn().mockResolvedValue([]);
+const mockDeleteCollection = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("chromadb", () => ({
     ChromaClient: class MockChromaClient {
         getOrCreateCollection = mockGetOrCreateCollection;
+        listCollections = mockListCollections;
+        deleteCollection = mockDeleteCollection;
     },
     Collection: class {},
     IncludeEnum: {
@@ -48,6 +54,8 @@ describe("PieceStore", () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         mockGetOrCreateCollection.mockResolvedValue(mockCollection);
+        mockListCollections.mockResolvedValue([]);
+        mockDeleteCollection.mockResolvedValue(undefined);
         mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
 
         store = new PieceStore({
@@ -114,7 +122,13 @@ describe("PieceStore", () => {
                 ids: ["test-uuid-1234"],
                 embeddings: [[0.1, 0.2, 0.3]],
                 documents: ["Hello world"],
-                metadatas: [expect.objectContaining({ tags: '["greeting","test"]' })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["greeting","test"]',
+                        [tagKey("greeting")]: true,
+                        [tagKey("test")]: true,
+                    }),
+                ],
             });
         });
 
@@ -152,6 +166,7 @@ describe("PieceStore", () => {
                     metadatas: [
                         expect.objectContaining({
                             tags: '["greeting"]',
+                            [tagKey("greeting")]: true,
                             title: "Greeting note",
                         }),
                     ],
@@ -315,7 +330,12 @@ describe("PieceStore", () => {
                 ids: ["id-1"],
                 documents: ["New content"],
                 embeddings: [[0.1, 0.2, 0.3]],
-                metadatas: [expect.objectContaining({ tags: '["new"]' })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["new"]',
+                        [tagKey("new")]: true,
+                    }),
+                ],
             });
         });
 
@@ -339,7 +359,12 @@ describe("PieceStore", () => {
             expect(mockEmbed).not.toHaveBeenCalled();
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
-                metadatas: [expect.objectContaining({ tags: '["newtag"]' })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["newtag"]',
+                        [tagKey("newtag")]: true,
+                    }),
+                ],
             });
         });
 
@@ -363,7 +388,12 @@ describe("PieceStore", () => {
                 expect.objectContaining({
                     documents: ["New content"],
                     embeddings: [[0.1, 0.2, 0.3]],
-                    metadatas: [expect.objectContaining({ tags: '["keep-me"]' })],
+                    metadatas: [
+                        expect.objectContaining({
+                            tags: '["keep-me"]',
+                            [tagKey("keep-me")]: true,
+                        }),
+                    ],
                 }),
             );
         });
@@ -396,6 +426,7 @@ describe("PieceStore", () => {
                 metadatas: [
                     expect.objectContaining({
                         tags: '["keep-me"]',
+                        [tagKey("keep-me")]: true,
                         title: "New title",
                     }),
                 ],
@@ -426,7 +457,12 @@ describe("PieceStore", () => {
             expect(mockUpdate).toHaveBeenCalledWith({
                 ids: ["id-1"],
                 embeddings: [[0.1, 0.2, 0.3]],
-                metadatas: [expect.objectContaining({ tags: '["keep-me"]' })],
+                metadatas: [
+                    expect.objectContaining({
+                        tags: '["keep-me"]',
+                        [tagKey("keep-me")]: true,
+                    }),
+                ],
             });
             expect(mockUpdate.mock.calls[0][0].metadatas[0]).not.toHaveProperty("title");
         });
@@ -568,7 +604,7 @@ describe("PieceStore", () => {
 
             expect(mockQuery).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    where: { tags: { $contains: "python" } },
+                    where: { [tagKey("python")]: true },
                 }),
             );
         });
@@ -587,8 +623,8 @@ describe("PieceStore", () => {
                 expect.objectContaining({
                     where: {
                         $and: [
-                            { tags: { $contains: "python" } },
-                            { tags: { $contains: "rag" } },
+                            { [tagKey("python")]: true },
+                            { [tagKey("rag")]: true },
                         ],
                     },
                 }),
@@ -836,7 +872,7 @@ describe("PieceStore", () => {
 
                 expect(mockQuery).toHaveBeenCalledWith(
                     expect.objectContaining({
-                        where: { tags: { $contains: "python" } },
+                        where: { [tagKey("python")]: true },
                         nResults: 15,
                     }),
                 );
@@ -883,6 +919,222 @@ describe("PieceStore", () => {
             await expect(
                 uninitializedStore.queryPieces("query"),
             ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling listCollections before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.listCollections(),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
+        it("throws when calling deleteCollection before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.deleteCollection("test"),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+    });
+
+    describe("multi-collection", () => {
+        it("uses default collection when no collection param is provided", async () => {
+            mockAdd.mockResolvedValueOnce(undefined);
+
+            await store.addPiece("Hello", ["tag"]);
+
+            expect(mockGetOrCreateCollection).toHaveBeenCalledWith({
+                name: "test-pieces",
+                metadata: { "hnsw:space": "cosine" },
+            });
+        });
+
+        it("creates and caches a new collection when collection param is provided", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.addPiece("Hello", ["tag"], undefined, "agent-alice");
+
+            expect(mockGetOrCreateCollection).toHaveBeenCalledWith({
+                name: "agent-alice",
+                metadata: { "hnsw:space": "cosine" },
+            });
+            expect(altCollection.add).toHaveBeenCalled();
+            expect(mockAdd).not.toHaveBeenCalled();
+        });
+
+        it("reuses cached collection on subsequent calls", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.addPiece("First", ["tag"], undefined, "agent-alice");
+            await store.addPiece("Second", ["tag"], undefined, "agent-alice");
+
+            // getOrCreateCollection called once during init (default) + once for agent-alice
+            // The second addPiece to agent-alice should reuse the cached collection
+            const aliceCalls = mockGetOrCreateCollection.mock.calls.filter(
+                (call: unknown[]) => (call[0] as { name: string }).name === "agent-alice",
+            );
+            expect(aliceCalls).toHaveLength(1);
+            expect(altCollection.add).toHaveBeenCalledTimes(2);
+        });
+
+        it("isolates operations between collections", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn().mockResolvedValue({
+                    ids: ["alt-id"],
+                    documents: ["Alt content"],
+                    metadatas: [{ tags: '["alt"]' }],
+                }),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            mockGet.mockResolvedValueOnce({
+                ids: ["default-id"],
+                documents: ["Default content"],
+                metadatas: [{ tags: '["default"]' }],
+            });
+
+            const defaultPiece = await store.getPiece("default-id");
+            const altPiece = await store.getPiece("alt-id", "agent-alice");
+
+            expect(mockGet).toHaveBeenCalledWith({
+                ids: ["default-id"],
+                include: ["documents", "metadatas"],
+            });
+            expect(altCollection.get).toHaveBeenCalledWith({
+                ids: ["alt-id"],
+                include: ["documents", "metadatas"],
+            });
+            expect(defaultPiece?.content).toBe("Default content");
+            expect(altPiece?.content).toBe("Alt content");
+        });
+
+        it("passes collection param through to deletePiece", async () => {
+            const altCollection = {
+                add: vi.fn(),
+                get: vi.fn(),
+                delete: vi.fn().mockResolvedValue(undefined),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.deletePiece("some-id", "agent-alice");
+
+            expect(altCollection.delete).toHaveBeenCalledWith({ ids: ["some-id"] });
+            expect(mockDelete).not.toHaveBeenCalled();
+        });
+
+        it("passes collection param through to queryPieces", async () => {
+            const altCollection = {
+                add: vi.fn(),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn().mockResolvedValue({
+                    ids: [[]],
+                    documents: [[]],
+                    metadatas: [[]],
+                    distances: [[]],
+                }),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.queryPieces("test", {}, "agent-alice");
+
+            expect(altCollection.query).toHaveBeenCalled();
+            expect(mockQuery).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("listCollections", () => {
+        it("returns collection names from ChromaDB", async () => {
+            mockListCollections.mockResolvedValueOnce(["pieces", "agent-alice", "agent-bob"]);
+
+            const result = await store.listCollections();
+
+            expect(result).toEqual(["pieces", "agent-alice", "agent-bob"]);
+            expect(mockListCollections).toHaveBeenCalledTimes(1);
+        });
+
+        it("returns empty array when no collections exist", async () => {
+            mockListCollections.mockResolvedValueOnce([]);
+
+            const result = await store.listCollections();
+
+            expect(result).toEqual([]);
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockListCollections.mockRejectedValueOnce(new Error("DB error"));
+
+            await expect(store.listCollections()).rejects.toThrow("DB error");
+        });
+    });
+
+    describe("deleteCollection", () => {
+        it("deletes the collection from ChromaDB", async () => {
+            await store.deleteCollection("agent-alice");
+
+            expect(mockDeleteCollection).toHaveBeenCalledWith({ name: "agent-alice" });
+        });
+
+        it("removes collection from cache after deletion", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            // Access to populate cache
+            await store.addPiece("Hello", [], undefined, "agent-alice");
+
+            // Delete the collection
+            await store.deleteCollection("agent-alice");
+
+            // Next access should call getOrCreateCollection again
+            const newAltCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(newAltCollection);
+
+            await store.addPiece("Hello again", [], undefined, "agent-alice");
+
+            const aliceCalls = mockGetOrCreateCollection.mock.calls.filter(
+                (call: unknown[]) => (call[0] as { name: string }).name === "agent-alice",
+            );
+            expect(aliceCalls).toHaveLength(2);
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockDeleteCollection.mockRejectedValueOnce(new Error("Delete failed"));
+
+            await expect(store.deleteCollection("test")).rejects.toThrow("Delete failed");
         });
     });
 });

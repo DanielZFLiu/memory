@@ -91,11 +91,12 @@ export class MemoryMcpServer {
                     content: z.string().describe("Piece content"),
                     title: z.string().optional().describe("Optional title for display and retrieval context"),
                     tags: z.array(z.string()).optional().describe("Optional tags for filtering and retrieval"),
+                    collection: z.string().optional().describe("Optional collection name (defaults to the configured collection)"),
                 }),
             },
-            async ({ content, title, tags }): Promise<CallToolResult> => {
+            async ({ content, title, tags, collection }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const piece: Piece = await this.store.addPiece(content, tags ?? [], title);
+                const piece: Piece = await this.store.addPiece(content, tags ?? [], title, collection);
                 return toolResult(piece);
             },
         );
@@ -106,11 +107,12 @@ export class MemoryMcpServer {
                 description: "Get a piece by ID.",
                 inputSchema: z.object({
                     id: z.string().describe("Piece ID"),
+                    collection: z.string().optional().describe("Optional collection name (defaults to the configured collection)"),
                 }),
             },
-            async ({ id }): Promise<CallToolResult> => {
+            async ({ id, collection }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const piece = await this.store.getPiece(id);
+                const piece = await this.store.getPiece(id, collection);
                 return toolResult({ found: !!piece, piece });
             },
         );
@@ -124,11 +126,12 @@ export class MemoryMcpServer {
                     content: z.string().optional().describe("New content (optional)"),
                     title: z.union([z.string(), z.null()]).optional().describe("New title, or null to clear it (optional)"),
                     tags: z.array(z.string()).optional().describe("New tags (optional)"),
+                    collection: z.string().optional().describe("Optional collection name (defaults to the configured collection)"),
                 }),
             },
-            async ({ id, content, title, tags }): Promise<CallToolResult> => {
+            async ({ id, content, title, tags, collection }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const piece = await this.store.updatePiece(id, content, tags, title);
+                const piece = await this.store.updatePiece(id, content, tags, title, collection);
                 return toolResult({ found: !!piece, piece });
             },
         );
@@ -139,11 +142,12 @@ export class MemoryMcpServer {
                 description: "Delete a piece by ID.",
                 inputSchema: z.object({
                     id: z.string().describe("Piece ID"),
+                    collection: z.string().optional().describe("Optional collection name (defaults to the configured collection)"),
                 }),
             },
-            async ({ id }): Promise<CallToolResult> => {
+            async ({ id, collection }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                await this.store.deletePiece(id);
+                await this.store.deletePiece(id, collection);
                 return toolResult({ deleted: true, id });
             },
         );
@@ -157,11 +161,12 @@ export class MemoryMcpServer {
                     tags: z.array(z.string()).optional().describe("Optional tag filter"),
                     topK: z.number().int().positive().optional().describe("Maximum number of results (default: 10)"),
                     useHybridSearch: z.boolean().optional().describe("Combine vector and keyword search via RRF (default: false)"),
+                    collection: z.string().optional().describe("Optional collection name (defaults to the configured collection)"),
                 }),
             },
-            async ({ query, tags, topK, useHybridSearch }): Promise<CallToolResult> => {
+            async ({ query, tags, topK, useHybridSearch, collection }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const results: QueryResult[] = await this.store.queryPieces(query, { tags, topK, useHybridSearch });
+                const results: QueryResult[] = await this.store.queryPieces(query, { tags, topK, useHybridSearch }, collection);
                 return toolResult(results);
             },
         );
@@ -175,12 +180,41 @@ export class MemoryMcpServer {
                     tags: z.array(z.string()).optional().describe("Optional tag filter"),
                     topK: z.number().int().positive().optional().describe("Maximum number of retrieved sources"),
                     useHybridSearch: z.boolean().optional().describe("Combine vector and keyword search via RRF (default: false)"),
+                    collection: z.string().optional().describe("Optional collection name (defaults to the configured collection)"),
                 }),
             },
-            async ({ query, tags, topK, useHybridSearch }): Promise<CallToolResult> => {
+            async ({ query, tags, topK, useHybridSearch, collection }): Promise<CallToolResult> => {
                 await this.ensureStoreInitialized();
-                const result: RagResult = await this.rag.query(query, { tags, topK, useHybridSearch });
+                const result: RagResult = await this.rag.query(query, { tags, topK, useHybridSearch }, collection);
                 return toolResult(result);
+            },
+        );
+
+        this.mcpServer.registerTool(
+            "list_collections",
+            {
+                description: "List all collection names in the memory store.",
+                inputSchema: z.object({}),
+            },
+            async (): Promise<CallToolResult> => {
+                await this.ensureStoreInitialized();
+                const collections = await this.store.listCollections();
+                return toolResult({ collections });
+            },
+        );
+
+        this.mcpServer.registerTool(
+            "delete_collection",
+            {
+                description: "Delete an entire collection and all its pieces from the memory store.",
+                inputSchema: z.object({
+                    collection: z.string().describe("Name of the collection to delete"),
+                }),
+            },
+            async ({ collection }): Promise<CallToolResult> => {
+                await this.ensureStoreInitialized();
+                await this.store.deleteCollection(collection);
+                return toolResult({ deleted: true, collection });
             },
         );
     }

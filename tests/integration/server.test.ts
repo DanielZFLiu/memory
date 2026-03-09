@@ -14,12 +14,28 @@ const mockChat = vi.fn(async (..._args: unknown[]) => ({
     message: { content: "Mocked LLM response based on provided context." },
 }));
 
-const inMemoryCollection = createInMemoryCollection();
-const mockGetOrCreateCollection = vi.fn(async () => inMemoryCollection);
+const collectionMap = new Map<string, ReturnType<typeof createInMemoryCollection>>();
+const defaultCollection = createInMemoryCollection();
+collectionMap.set("integration-test", defaultCollection);
+
+const mockGetOrCreateCollection = vi.fn(async (params: { name: string }) => {
+    let col = collectionMap.get(params.name);
+    if (!col) {
+        col = createInMemoryCollection();
+        collectionMap.set(params.name, col);
+    }
+    return col;
+});
+const mockListCollections = vi.fn(async () => Array.from(collectionMap.keys()));
+const mockDeleteCollectionFn = vi.fn(async (params: { name: string }) => {
+    collectionMap.delete(params.name);
+});
 
 vi.mock("chromadb", () => ({
     ChromaClient: class {
         getOrCreateCollection = mockGetOrCreateCollection;
+        listCollections = mockListCollections;
+        deleteCollection = mockDeleteCollectionFn;
     },
     Collection: class {},
     IncludeEnum: {
@@ -76,8 +92,21 @@ describe("Integration: Full API Stack", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        inMemoryCollection._clear();
-        mockGetOrCreateCollection.mockImplementation(async () => inMemoryCollection);
+        collectionMap.clear();
+        const freshDefault = createInMemoryCollection();
+        collectionMap.set("integration-test", freshDefault);
+        mockGetOrCreateCollection.mockImplementation(async (params: { name: string }) => {
+            let col = collectionMap.get(params.name);
+            if (!col) {
+                col = createInMemoryCollection();
+                collectionMap.set(params.name, col);
+            }
+            return col;
+        });
+        mockListCollections.mockImplementation(async () => Array.from(collectionMap.keys()));
+        mockDeleteCollectionFn.mockImplementation(async (params: { name: string }) => {
+            collectionMap.delete(params.name);
+        });
         app = createServer({
             collectionName: "integration-test",
         });
@@ -698,6 +727,147 @@ describe("Integration: Full API Stack", () => {
 
             expect(res.status).toBe(503);
             expect(res.body.error).toContain("Failed to connect to ChromaDB");
+        });
+    });
+
+    // -------------------------------------------------------------------
+    // Multi-Collection
+    // -------------------------------------------------------------------
+
+    describe("multi-collection", () => {
+        it("isolates pieces between collections", async () => {
+            // Add piece to default collection
+            const defaultRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Default piece", tags: ["default"] });
+            expect(defaultRes.status).toBe(201);
+
+            // Add piece to agent-alice collection
+            const aliceRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Alice piece", tags: ["alice"], collection: "agent-alice" });
+            expect(aliceRes.status).toBe(201);
+
+            // GET from default — should find the default piece
+            const getDefault = await request(app).get(`/pieces/${defaultRes.body.id}`);
+            expect(getDefault.status).toBe(200);
+            expect(getDefault.body.content).toBe("Default piece");
+
+            // GET from agent-alice — should find Alice's piece
+            const getAlice = await request(app).get(`/pieces/${aliceRes.body.id}?collection=agent-alice`);
+            expect(getAlice.status).toBe(200);
+            expect(getAlice.body.content).toBe("Alice piece");
+
+            // GET Alice's piece from default collection — should NOT find it
+            const crossGet = await request(app).get(`/pieces/${aliceRes.body.id}`);
+            expect(crossGet.status).toBe(404);
+        });
+
+        it("searches within the specified collection only", async () => {
+            await request(app)
+                .post("/pieces")
+                .send({ content: "TypeScript is great", tags: ["ts"] });
+
+            await request(app)
+                .post("/pieces")
+                .send({ content: "Python is great", tags: ["py"], collection: "agent-bob" });
+
+            // Query default collection
+            const defaultResults = await request(app)
+                .post("/query")
+                .send({ query: "programming", topK: 10 });
+            expect(defaultResults.status).toBe(200);
+            expect(defaultResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("TypeScript"),
+            )).toBe(true);
+            expect(defaultResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("Python"),
+            )).toBe(false);
+
+            // Query agent-bob collection
+            const bobResults = await request(app)
+                .post("/query")
+                .send({ query: "programming", topK: 10, collection: "agent-bob" });
+            expect(bobResults.status).toBe(200);
+            expect(bobResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("Python"),
+            )).toBe(true);
+            expect(bobResults.body.some((r: { piece: { content: string } }) =>
+                r.piece.content.includes("TypeScript"),
+            )).toBe(false);
+        });
+
+        it("lists all collections", async () => {
+            // Access a second collection to create it
+            await request(app)
+                .post("/pieces")
+                .send({ content: "test", tags: [], collection: "agent-alice" });
+
+            const res = await request(app).get("/collections");
+            expect(res.status).toBe(200);
+            expect(res.body.collections).toContain("integration-test");
+            expect(res.body.collections).toContain("agent-alice");
+        });
+
+        it("deletes a collection", async () => {
+            // Create a collection
+            await request(app)
+                .post("/pieces")
+                .send({ content: "temp", tags: [], collection: "to-delete" });
+
+            // Verify it exists
+            let listRes = await request(app).get("/collections");
+            expect(listRes.body.collections).toContain("to-delete");
+
+            // Delete it
+            const deleteRes = await request(app).delete("/collections/to-delete");
+            expect(deleteRes.status).toBe(204);
+
+            // Verify it's gone
+            listRes = await request(app).get("/collections");
+            expect(listRes.body.collections).not.toContain("to-delete");
+        });
+
+        it("updates a piece in a specific collection", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "Original", tags: ["x"], collection: "agent-alice" });
+
+            const updateRes = await request(app)
+                .put(`/pieces/${createRes.body.id}`)
+                .send({ content: "Updated", collection: "agent-alice" });
+
+            expect(updateRes.status).toBe(200);
+            expect(updateRes.body.content).toBe("Updated");
+        });
+
+        it("deletes a piece from a specific collection", async () => {
+            const createRes = await request(app)
+                .post("/pieces")
+                .send({ content: "To delete", tags: [], collection: "agent-alice" });
+
+            const deleteRes = await request(app)
+                .delete(`/pieces/${createRes.body.id}?collection=agent-alice`);
+            expect(deleteRes.status).toBe(204);
+
+            const getRes = await request(app)
+                .get(`/pieces/${createRes.body.id}?collection=agent-alice`);
+            expect(getRes.status).toBe(404);
+        });
+
+        it("RAG query targets the specified collection", async () => {
+            await request(app)
+                .post("/pieces")
+                .send({ content: "RAG info for Alice's agent", tags: ["ai"], collection: "agent-alice" });
+
+            const res = await request(app)
+                .post("/rag")
+                .send({ query: "RAG", topK: 5, collection: "agent-alice" });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toHaveProperty("answer");
+            expect(res.body.sources.length).toBeGreaterThan(0);
+            expect(res.body.sources[0].piece.content).toContain("Alice");
         });
     });
 });

@@ -90,11 +90,7 @@ export function createInMemoryCollection() {
 
             // Very basic where-clause support for tag filtering
             if (params.where) {
-                candidates = candidates.filter((d) => {
-                    const tags = parseTags(d.metadata.tags);
-                    if (tags.length === 0) return false;
-                    return matchesWhere(tags, params.where!);
-                });
+                candidates = candidates.filter((d) => matchesWhere(d.metadata, params.where!));
             }
 
             // Score by dot product
@@ -128,19 +124,26 @@ export function dotProduct(a: number[], b: number[]): number {
     return sum;
 }
 
-export function matchesWhere(tags: string[], where: Record<string, unknown>): boolean {
+export function matchesWhere(metadata: Record<string, unknown>, where: Record<string, unknown>): boolean {
     if ("$and" in where) {
         return (where.$and as Record<string, unknown>[]).every((clause) =>
-            matchesWhere(tags, clause),
+            matchesWhere(metadata, clause),
         );
     }
-    if ("tags" in where) {
+    if ("tags" in where && typeof where.tags === "object" && where.tags !== null) {
         const condition = where.tags as Record<string, string>;
         if ("$contains" in condition) {
-            return tags.includes(condition.$contains);
+            return parseTags(metadata.tags).includes(condition.$contains);
         }
     }
-    return true;
+
+    return Object.entries(where).every(([key, value]) => {
+        if (key === "$and") {
+            return true;
+        }
+
+        return metadata[key] === value;
+    });
 }
 
 // ---------------------------------------------------------------------------

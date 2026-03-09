@@ -50,10 +50,31 @@ export function createServer(config: MemoryConfig = {}) {
         next();
     });
 
+    // GET /collections — List all collections
+    app.get("/collections", async (_req: Request, res: Response) => {
+        try {
+            const collections = await store.listCollections();
+            res.json({ collections });
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // DELETE /collections/:name — Delete a collection
+    app.delete("/collections/:name", async (req: Request<{ name: string }>, res: Response) => {
+        try {
+            const { name } = req.params;
+            await store.deleteCollection(name);
+            res.status(204).send();
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
     // POST /pieces — Add a piece
     app.post("/pieces", async (req: Request, res: Response) => {
         try {
-            const { content, title, tags } = req.body;
+            const { content, title, tags, collection } = req.body;
             if (!content || typeof content !== "string") {
                 res.status(400).json({ error: "content (string) is required" });
                 return;
@@ -66,7 +87,11 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "tags must be an array of strings when provided" });
                 return;
             }
-            const piece = await store.addPiece(content, tags ?? [], title);
+            if (collection !== undefined && typeof collection !== "string") {
+                res.status(400).json({ error: "collection must be a string when provided" });
+                return;
+            }
+            const piece = await store.addPiece(content, tags ?? [], title, collection);
             res.status(201).json(piece);
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -77,7 +102,8 @@ export function createServer(config: MemoryConfig = {}) {
     app.get("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
             const { id } = req.params;
-            const piece = await store.getPiece(id);
+            const collection = typeof req.query.collection === "string" ? req.query.collection : undefined;
+            const piece = await store.getPiece(id, collection);
             if (!piece) {
                 res.status(404).json({ error: "Piece not found" });
                 return;
@@ -92,7 +118,7 @@ export function createServer(config: MemoryConfig = {}) {
     app.put("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
             const { id } = req.params;
-            const { content, title, tags } = req.body;
+            const { content, title, tags, collection } = req.body;
             if (content !== undefined && typeof content !== "string") {
                 res.status(400).json({ error: "content must be a string when provided" });
                 return;
@@ -106,7 +132,11 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "tags must be an array of strings when provided" });
                 return;
             }
-            const piece = await store.updatePiece(id, content, tags, validatedTitle);
+            if (collection !== undefined && typeof collection !== "string") {
+                res.status(400).json({ error: "collection must be a string when provided" });
+                return;
+            }
+            const piece = await store.updatePiece(id, content, tags, validatedTitle, collection);
             if (!piece) {
                 res.status(404).json({ error: "Piece not found" });
                 return;
@@ -121,7 +151,8 @@ export function createServer(config: MemoryConfig = {}) {
     app.delete("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
             const { id } = req.params;
-            await store.deletePiece(id);
+            const collection = typeof req.query.collection === "string" ? req.query.collection : undefined;
+            await store.deletePiece(id, collection);
             res.status(204).send();
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -131,7 +162,7 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /query — Semantic search
     app.post("/query", async (req: Request, res: Response) => {
         try {
-            const { query, tags, topK, useHybridSearch } = req.body;
+            const { query, tags, topK, useHybridSearch, collection } = req.body;
             if (!query || typeof query !== "string") {
                 res.status(400).json({ error: "query (string) is required" });
                 return;
@@ -148,7 +179,11 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "useHybridSearch must be a boolean when provided" });
                 return;
             }
-            const results = await store.queryPieces(query, { tags, topK, useHybridSearch });
+            if (collection !== undefined && typeof collection !== "string") {
+                res.status(400).json({ error: "collection must be a string when provided" });
+                return;
+            }
+            const results = await store.queryPieces(query, { tags, topK, useHybridSearch }, collection);
             res.json(results);
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -158,7 +193,7 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /rag — Full RAG query
     app.post("/rag", async (req: Request, res: Response) => {
         try {
-            const { query, tags, topK, useHybridSearch } = req.body;
+            const { query, tags, topK, useHybridSearch, collection } = req.body;
             if (!query || typeof query !== "string") {
                 res.status(400).json({ error: "query (string) is required" });
                 return;
@@ -175,7 +210,11 @@ export function createServer(config: MemoryConfig = {}) {
                 res.status(400).json({ error: "useHybridSearch must be a boolean when provided" });
                 return;
             }
-            const result = await rag.query(query, { tags, topK, useHybridSearch });
+            if (collection !== undefined && typeof collection !== "string") {
+                res.status(400).json({ error: "collection must be a string when provided" });
+                return;
+            }
+            const result = await rag.query(query, { tags, topK, useHybridSearch }, collection);
             res.json(result);
         } catch (err) {
             res.status(500).json({ error: String(err) });
