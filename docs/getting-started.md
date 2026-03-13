@@ -68,18 +68,4 @@ npm run db:port -- 8001  # start ChromaDB on a custom port
 - [npm Package](./npm-package.md)
 - [REST API](./rest-api.md)
 
-If you want to see incoming REST API requests during local development, set `MEMORY_REQUEST_LOGGING=metadata` or `REQUEST_LOGGING=metadata` before starting the HTTP server. To log JSON request bodies as well, use `body` instead of `metadata`.
-
-If you need to call the REST API from a browser-based frontend on a different origin, set `MEMORY_CORS_ORIGINS` or `CORS_ORIGINS` to a comma-separated allowlist such as `http://localhost:5173`. CORS remains disabled by default.
-
-## Configuration
-
 See [Configuration](./configuration.md) for runtime options and supported environment variables.
-
-## Testing
-
-```bash
-npm test
-npm run test:watch
-npm run test:coverage
-```

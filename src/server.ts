@@ -11,16 +11,24 @@ const REQUEST_BODY_LOG_MAX_LENGTH = 2_000;
 const DEFAULT_CORS_METHODS = "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS";
 const DEFAULT_CORS_HEADERS = "Content-Type";
 
-function getCollectionLabel(req: Request): string | undefined {
-    const bodyCollection =
-        req.body && typeof req.body === "object" && "collection" in req.body
-            ? req.body.collection
-            : undefined;
-    if (typeof bodyCollection === "string") {
-        return bodyCollection;
-    }
+interface PaginationRequest {
+    collection?: string;
+    limit?: number;
+    offset?: number;
+}
 
-    return typeof req.query.collection === "string" ? req.query.collection : undefined;
+interface SearchRequestPayload {
+    query: string;
+    tags?: string[];
+    topK?: number;
+    useHybridSearch?: boolean;
+    collection?: string;
+}
+
+type SearchRequestParseResult = SearchRequestPayload | { error: string };
+
+function getCollectionLabel(req: Request): string | undefined {
+    return getBodyCollection(req.body) ?? getQueryCollection(req);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -29,6 +37,22 @@ function isStringArray(value: unknown): value is string[] {
 
 function isPositiveInteger(value: unknown): value is number {
     return Number.isInteger(value) && typeof value === "number" && value > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object";
+}
+
+function getQueryCollection(req: Request): string | undefined {
+    return typeof req.query.collection === "string" ? req.query.collection : undefined;
+}
+
+function getBodyCollection(body: unknown): string | undefined {
+    if (!isRecord(body) || typeof body.collection !== "string") {
+        return undefined;
+    }
+
+    return body.collection;
 }
 
 function validateTitle(value: unknown, allowNull = false): string | null | undefined {
@@ -161,6 +185,60 @@ function httpGetJson(urlString: string): Promise<{ statusCode: number; body: unk
         });
         request.end();
     });
+}
+
+function parsePaginationRequest(req: Request): PaginationRequest & { error?: string } {
+    const collection = getQueryCollection(req);
+    const limit = parsePositiveIntegerQuery(req.query.limit);
+    if (Number.isNaN(limit)) {
+        return { error: "limit must be a positive integer when provided" };
+    }
+
+    const offset = parseNonNegativeIntegerQuery(req.query.offset);
+    if (Number.isNaN(offset)) {
+        return { error: "offset must be a non-negative integer when provided" };
+    }
+
+    return { collection, limit, offset };
+}
+
+function parseSearchRequestBody(body: unknown): SearchRequestParseResult {
+    if (!isRecord(body)) {
+        return { error: "Invalid request body" };
+    }
+
+    const query = body.query;
+    if (!query || typeof query !== "string") {
+        return { error: "query (string) is required" };
+    }
+
+    const tags = body.tags;
+    if (tags !== undefined && !isStringArray(tags)) {
+        return { error: "tags must be an array of strings when provided" };
+    }
+
+    const topK = body.topK;
+    if (topK !== undefined && !isPositiveInteger(topK)) {
+        return { error: "topK must be a positive integer when provided" };
+    }
+
+    const useHybridSearch = body.useHybridSearch;
+    if (useHybridSearch !== undefined && typeof useHybridSearch !== "boolean") {
+        return { error: "useHybridSearch must be a boolean when provided" };
+    }
+
+    const collection = body.collection;
+    if (collection !== undefined && typeof collection !== "string") {
+        return { error: "collection must be a string when provided" };
+    }
+
+    return {
+        query,
+        ...(tags !== undefined ? { tags } : {}),
+        ...(topK !== undefined ? { topK } : {}),
+        ...(useHybridSearch !== undefined ? { useHybridSearch } : {}),
+        ...(collection !== undefined ? { collection } : {}),
+    };
 }
 
 export function createServer(config: MemoryConfig = {}) {
@@ -332,22 +410,15 @@ export function createServer(config: MemoryConfig = {}) {
 
     app.get("/tags", async (req: Request, res: Response) => {
         try {
-            const collection = typeof req.query.collection === "string" ? req.query.collection : undefined;
-            const limit = parsePositiveIntegerQuery(req.query.limit);
-            if (Number.isNaN(limit)) {
-                res.status(400).json({ error: "limit must be a positive integer when provided" });
+            const pagination = parsePaginationRequest(req);
+            if ("error" in pagination) {
+                res.status(400).json({ error: pagination.error });
                 return;
             }
 
-            const offset = parseNonNegativeIntegerQuery(req.query.offset);
-            if (Number.isNaN(offset)) {
-                res.status(400).json({ error: "offset must be a non-negative integer when provided" });
-                return;
-            }
-
-            const tags = await store.listTags(collection);
-            const start = offset ?? 0;
-            const end = limit !== undefined ? start + limit : undefined;
+            const tags = await store.listTags(pagination.collection);
+            const start = pagination.offset ?? 0;
+            const end = pagination.limit !== undefined ? start + pagination.limit : undefined;
             res.json({ tags: tags.slice(start, end) });
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -383,20 +454,13 @@ export function createServer(config: MemoryConfig = {}) {
 
     app.get("/pieces", async (req: Request, res: Response) => {
         try {
-            const collection = typeof req.query.collection === "string" ? req.query.collection : undefined;
-            const limit = parsePositiveIntegerQuery(req.query.limit);
-            if (Number.isNaN(limit)) {
-                res.status(400).json({ error: "limit must be a positive integer when provided" });
+            const pagination = parsePaginationRequest(req);
+            if ("error" in pagination) {
+                res.status(400).json({ error: pagination.error });
                 return;
             }
 
-            const offset = parseNonNegativeIntegerQuery(req.query.offset);
-            if (Number.isNaN(offset)) {
-                res.status(400).json({ error: "offset must be a non-negative integer when provided" });
-                return;
-            }
-
-            const pieces = await store.listPieces({ limit, offset }, collection);
+            const pieces = await store.listPieces({ limit: pagination.limit, offset: pagination.offset }, pagination.collection);
             res.json({ pieces });
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -407,8 +471,7 @@ export function createServer(config: MemoryConfig = {}) {
     app.get("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
             const { id } = req.params;
-            const collection = typeof req.query.collection === "string" ? req.query.collection : undefined;
-            const piece = await store.getPiece(id, collection);
+            const piece = await store.getPiece(id, getQueryCollection(req));
             if (!piece) {
                 res.status(404).json({ error: "Piece not found" });
                 return;
@@ -456,8 +519,7 @@ export function createServer(config: MemoryConfig = {}) {
     app.delete("/pieces/:id", async (req: Request<{ id: string }>, res: Response) => {
         try {
             const { id } = req.params;
-            const collection = typeof req.query.collection === "string" ? req.query.collection : undefined;
-            await store.deletePiece(id, collection);
+            await store.deletePiece(id, getQueryCollection(req));
             res.status(204).send();
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -467,28 +529,21 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /query — Semantic search
     app.post("/query", async (req: Request, res: Response) => {
         try {
-            const { query, tags, topK, useHybridSearch, collection } = req.body;
-            if (!query || typeof query !== "string") {
-                res.status(400).json({ error: "query (string) is required" });
+            const searchRequest = parseSearchRequestBody(req.body);
+            if ("error" in searchRequest) {
+                res.status(400).json({ error: searchRequest.error });
                 return;
             }
-            if (tags !== undefined && !isStringArray(tags)) {
-                res.status(400).json({ error: "tags must be an array of strings when provided" });
-                return;
-            }
-            if (topK !== undefined && !isPositiveInteger(topK)) {
-                res.status(400).json({ error: "topK must be a positive integer when provided" });
-                return;
-            }
-            if (useHybridSearch !== undefined && typeof useHybridSearch !== "boolean") {
-                res.status(400).json({ error: "useHybridSearch must be a boolean when provided" });
-                return;
-            }
-            if (collection !== undefined && typeof collection !== "string") {
-                res.status(400).json({ error: "collection must be a string when provided" });
-                return;
-            }
-            const results = await store.queryPieces(query, { tags, topK, useHybridSearch }, collection);
+
+            const results = await store.queryPieces(
+                searchRequest.query,
+                {
+                    tags: searchRequest.tags,
+                    topK: searchRequest.topK,
+                    useHybridSearch: searchRequest.useHybridSearch,
+                },
+                searchRequest.collection,
+            );
             res.json(results);
         } catch (err) {
             res.status(500).json({ error: String(err) });
@@ -498,28 +553,21 @@ export function createServer(config: MemoryConfig = {}) {
     // POST /rag — Full RAG query
     app.post("/rag", async (req: Request, res: Response) => {
         try {
-            const { query, tags, topK, useHybridSearch, collection } = req.body;
-            if (!query || typeof query !== "string") {
-                res.status(400).json({ error: "query (string) is required" });
+            const searchRequest = parseSearchRequestBody(req.body);
+            if ("error" in searchRequest) {
+                res.status(400).json({ error: searchRequest.error });
                 return;
             }
-            if (tags !== undefined && !isStringArray(tags)) {
-                res.status(400).json({ error: "tags must be an array of strings when provided" });
-                return;
-            }
-            if (topK !== undefined && !isPositiveInteger(topK)) {
-                res.status(400).json({ error: "topK must be a positive integer when provided" });
-                return;
-            }
-            if (useHybridSearch !== undefined && typeof useHybridSearch !== "boolean") {
-                res.status(400).json({ error: "useHybridSearch must be a boolean when provided" });
-                return;
-            }
-            if (collection !== undefined && typeof collection !== "string") {
-                res.status(400).json({ error: "collection must be a string when provided" });
-                return;
-            }
-            const result = await rag.query(query, { tags, topK, useHybridSearch }, collection);
+
+            const result = await rag.query(
+                searchRequest.query,
+                {
+                    tags: searchRequest.tags,
+                    topK: searchRequest.topK,
+                    useHybridSearch: searchRequest.useHybridSearch,
+                },
+                searchRequest.collection,
+            );
             res.json(result);
         } catch (err) {
             res.status(500).json({ error: String(err) });

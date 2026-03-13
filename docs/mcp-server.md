@@ -2,10 +2,9 @@
 
 Use Memory as a standalone Model Context Protocol server over stdio.
 
-## Start from a local clone
+After completing [Getting Started](./getting-started.md), run the MCP server from a local clone with:
 
 ```bash
-npm install
 npm run build
 node ./dist/main.js
 ```

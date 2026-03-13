@@ -4,24 +4,24 @@ Use Memory as a standalone HTTP service.
 
 ## Start the server
 
+After completing [Getting Started](./getting-started.md):
+
 ### Development
 
 ```bash
-npm install
 npm run dev:http
 ```
 
 ### Production-style run
 
 ```bash
-npm install
 npm run build
 npm run start:http
 ```
 
 The server listens on `http://localhost:3000` by default. Set `PORT` to change it.
 
-For browser-based consumers on a different origin, the REST server can emit allowlist-based CORS headers via `corsOrigins`. CORS stays disabled by default; see [Configuration](./configuration.md).
+See [Configuration](./configuration.md) for runtime options such as CORS and request logging.
 
 ## API contract
 
