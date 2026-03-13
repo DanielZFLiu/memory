@@ -8,6 +8,8 @@ import { MemoryConfig } from "./types";
 import { resolveConfig } from "./config";
 
 const REQUEST_BODY_LOG_MAX_LENGTH = 2_000;
+const DEFAULT_CORS_METHODS = "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS";
+const DEFAULT_CORS_HEADERS = "Content-Type";
 
 function getCollectionLabel(req: Request): string | undefined {
     const bodyCollection =
@@ -86,6 +88,41 @@ function truncateValue(value: string, maxLength = REQUEST_BODY_LOG_MAX_LENGTH): 
     return `${value.slice(0, maxLength)}…`;
 }
 
+function appendVaryHeader(res: Response, value: string): void {
+    const existing = res.getHeader("Vary");
+    if (typeof existing === "string" && existing.length > 0) {
+        const values = existing.split(",").map((entry) => entry.trim());
+        if (!values.includes(value)) {
+            res.setHeader("Vary", `${existing}, ${value}`);
+        }
+        return;
+    }
+
+    if (Array.isArray(existing) && existing.length > 0) {
+        if (!existing.includes(value)) {
+            res.setHeader("Vary", [...existing, value]);
+        }
+        return;
+    }
+
+    res.setHeader("Vary", value);
+}
+
+function applyCorsHeaders(req: Request, res: Response, allowedOrigin: string): void {
+    appendVaryHeader(res, "Origin");
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    res.setHeader("Access-Control-Allow-Methods", DEFAULT_CORS_METHODS);
+
+    const requestedHeaders = req.header("Access-Control-Request-Headers");
+    if (requestedHeaders) {
+        appendVaryHeader(res, "Access-Control-Request-Headers");
+        res.setHeader("Access-Control-Allow-Headers", requestedHeaders);
+        return;
+    }
+
+    res.setHeader("Access-Control-Allow-Headers", DEFAULT_CORS_HEADERS);
+}
+
 function httpGetJson(urlString: string): Promise<{ statusCode: number; body: unknown }> {
     return new Promise((resolve, reject) => {
         const url = new URL(urlString);
@@ -129,6 +166,29 @@ function httpGetJson(urlString: string): Promise<{ statusCode: number; body: unk
 export function createServer(config: MemoryConfig = {}) {
     const resolvedConfig = resolveConfig(config);
     const app = express();
+    const allowedOrigins = new Set(resolvedConfig.corsOrigins);
+
+    app.use((req, res, next) => {
+        if (allowedOrigins.size === 0) {
+            next();
+            return;
+        }
+
+        const origin = req.header("Origin");
+        if (!origin || !allowedOrigins.has(origin)) {
+            next();
+            return;
+        }
+
+        applyCorsHeaders(req, res, origin);
+        if (req.method === "OPTIONS") {
+            res.status(204).send();
+            return;
+        }
+
+        next();
+    });
+
     app.use(express.json());
 
     if (resolvedConfig.requestLogging !== "off") {

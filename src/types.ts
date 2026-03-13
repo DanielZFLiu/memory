@@ -14,6 +14,7 @@ export interface MemoryConfig {
     generationModel?: string;
     collectionName?: string;
     requestLogging?: RequestLoggingMode;
+    corsOrigins?: string[];
 }
 
 export interface QueryOptions {

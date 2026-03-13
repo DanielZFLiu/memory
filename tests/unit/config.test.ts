@@ -24,6 +24,7 @@ describe("resolveConfig", () => {
             generationModel: "generate-model",
             collectionName: "docker-pieces",
             requestLogging: "off",
+            corsOrigins: [],
         });
     });
 
@@ -36,6 +37,15 @@ describe("resolveConfig", () => {
         });
     });
 
+    it("uses explicit cors origin environment overrides", () => {
+        vi.stubEnv("MEMORY_CORS_ORIGINS", "http://localhost:5173, https://notes.example.com ");
+
+        expect(resolveConfig()).toEqual({
+            ...DEFAULT_MEMORY_CONFIG,
+            corsOrigins: ["http://localhost:5173", "https://notes.example.com"],
+        });
+    });
+
     it("prefers explicit config over environment overrides", () => {
         vi.stubEnv("CHROMA_URL", "http://chromadb:8000");
         vi.stubEnv("OLLAMA_URL", "http://host.docker.internal:11434");
@@ -43,6 +53,7 @@ describe("resolveConfig", () => {
         vi.stubEnv("GENERATION_MODEL", "generate-model");
         vi.stubEnv("COLLECTION_NAME", "docker-pieces");
         vi.stubEnv("REQUEST_LOGGING", "metadata");
+        vi.stubEnv("CORS_ORIGINS", "https://from-env.example.com");
 
         expect(
             resolveConfig({
@@ -52,6 +63,7 @@ describe("resolveConfig", () => {
                 generationModel: "local-generate",
                 collectionName: "local-pieces",
                 requestLogging: "body",
+                corsOrigins: ["http://localhost:5173"],
             }),
         ).toEqual({
             chromaUrl: "http://localhost:8000",
@@ -60,12 +72,14 @@ describe("resolveConfig", () => {
             generationModel: "local-generate",
             collectionName: "local-pieces",
             requestLogging: "body",
+            corsOrigins: ["http://localhost:5173"],
         });
     });
 
     it("ignores blank environment variables", () => {
         vi.stubEnv("MEMORY_CHROMA_URL", "   ");
         vi.stubEnv("MEMORY_OLLAMA_URL", "");
+        vi.stubEnv("MEMORY_CORS_ORIGINS", "   ");
 
         expect(resolveConfig()).toEqual(DEFAULT_MEMORY_CONFIG);
     });

@@ -848,6 +848,74 @@ describe("Integration: Full API Stack", () => {
         });
     });
 
+    describe("cors", () => {
+        it("does not emit cors headers when cors is disabled", async () => {
+            const res = await request(app)
+                .get("/health")
+                .set("Origin", "http://localhost:5173");
+
+            expect(res.status).toBe(503);
+            expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+        });
+
+        it("emits cors headers for allowed origins", async () => {
+            await withJsonServer(200, { models: [] }, async (ollamaUrl) => {
+                const corsApp = createServer({
+                    collectionName: "integration-test",
+                    ollamaUrl,
+                    corsOrigins: ["http://localhost:5173"],
+                });
+
+                const res = await request(corsApp)
+                    .get("/health")
+                    .set("Origin", "http://localhost:5173");
+
+                expect(res.status).toBe(200);
+                expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+                expect(res.headers["access-control-allow-methods"]).toContain("GET");
+                expect(res.headers.vary).toContain("Origin");
+            });
+        });
+
+        it("does not emit cors headers for disallowed origins", async () => {
+            await withJsonServer(200, { models: [] }, async (ollamaUrl) => {
+                const corsApp = createServer({
+                    collectionName: "integration-test",
+                    ollamaUrl,
+                    corsOrigins: ["http://localhost:5173"],
+                });
+
+                const res = await request(corsApp)
+                    .get("/health")
+                    .set("Origin", "http://malicious.example.com");
+
+                expect(res.status).toBe(200);
+                expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+            });
+        });
+
+        it("handles allowed preflight requests with a 204 response", async () => {
+            const corsApp = createServer({
+                collectionName: "integration-test",
+                corsOrigins: ["http://localhost:5173"],
+            });
+
+            const res = await request(corsApp)
+                .options("/pieces")
+                .set("Origin", "http://localhost:5173")
+                .set("Access-Control-Request-Method", "POST")
+                .set("Access-Control-Request-Headers", "Content-Type, X-Notes-Client");
+
+            expect(res.status).toBe(204);
+            expect(res.text).toBe("");
+            expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+            expect(res.headers["access-control-allow-methods"]).toContain("POST");
+            expect(res.headers["access-control-allow-headers"]).toBe("Content-Type, X-Notes-Client");
+            expect(res.headers.vary).toContain("Origin");
+            expect(res.headers.vary).toContain("Access-Control-Request-Headers");
+        });
+    });
+
     describe("request logging", () => {
         it("logs request metadata when metadata logging is enabled", async () => {
             const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);

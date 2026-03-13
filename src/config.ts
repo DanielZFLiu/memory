@@ -7,6 +7,7 @@ export const DEFAULT_MEMORY_CONFIG: Required<MemoryConfig> = {
     generationModel: "gemma3:latest",
     collectionName: "pieces",
     requestLogging: "off",
+    corsOrigins: [],
 };
 
 const ENV_CONFIG_KEYS: Record<keyof Required<MemoryConfig>, string[]> = {
@@ -16,6 +17,7 @@ const ENV_CONFIG_KEYS: Record<keyof Required<MemoryConfig>, string[]> = {
     generationModel: ["MEMORY_GENERATION_MODEL", "GENERATION_MODEL"],
     collectionName: ["MEMORY_COLLECTION_NAME", "COLLECTION_NAME"],
     requestLogging: ["MEMORY_REQUEST_LOGGING", "REQUEST_LOGGING"],
+    corsOrigins: ["MEMORY_CORS_ORIGINS", "CORS_ORIGINS"],
 };
 
 function resolveEnvOverride(keys: string[]): string | undefined {
@@ -43,12 +45,30 @@ function resolveRequestLoggingEnvOverride(keys: string[]): RequestLoggingMode | 
     return undefined;
 }
 
+function resolveCorsOriginsEnvOverride(keys: string[]): string[] | undefined {
+    const value = resolveEnvOverride(keys);
+    if (value === undefined) {
+        return undefined;
+    }
+
+    const origins = value
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0);
+
+    return origins.length > 0 ? origins : undefined;
+}
+
 export function resolveConfig(config: MemoryConfig = {}): Required<MemoryConfig> {
     const envRequestLogging = resolveRequestLoggingEnvOverride(ENV_CONFIG_KEYS.requestLogging);
     const requestLogging =
         config.requestLogging ??
         envRequestLogging ??
         DEFAULT_MEMORY_CONFIG.requestLogging;
+    const corsOrigins =
+        config.corsOrigins ??
+        resolveCorsOriginsEnvOverride(ENV_CONFIG_KEYS.corsOrigins) ??
+        DEFAULT_MEMORY_CONFIG.corsOrigins;
 
     return {
         chromaUrl:
@@ -72,5 +92,6 @@ export function resolveConfig(config: MemoryConfig = {}): Required<MemoryConfig>
             resolveEnvOverride(ENV_CONFIG_KEYS.collectionName) ??
             DEFAULT_MEMORY_CONFIG.collectionName,
         requestLogging,
+        corsOrigins,
     };
 }

@@ -21,6 +21,8 @@ npm run start:http
 
 The server listens on `http://localhost:3000` by default. Set `PORT` to change it.
 
+For browser-based consumers on a different origin, the REST server can emit allowlist-based CORS headers via `corsOrigins`. CORS stays disabled by default; see [Configuration](./configuration.md).
+
 ## API contract
 
 Base URL: `http://localhost:3000`
