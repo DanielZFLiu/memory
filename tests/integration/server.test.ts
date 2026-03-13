@@ -1000,10 +1000,7 @@ describe("Integration: Full API Stack", () => {
         });
 
         it("lists all collections", async () => {
-            // Access a second collection to create it
-            await request(app)
-                .post("/pieces")
-                .send({ content: "test", tags: [], collection: "agent-alice" });
+            await request(app).put("/collections/agent-alice");
 
             const res = await request(app).get("/collections");
             expect(res.status).toBe(200);
@@ -1011,21 +1008,24 @@ describe("Integration: Full API Stack", () => {
             expect(res.body.collections).toContain("agent-alice");
         });
 
-        it("deletes a collection", async () => {
-            // Create a collection
-            await request(app)
-                .post("/pieces")
-                .send({ content: "temp", tags: [], collection: "to-delete" });
+        it("creates a collection explicitly", async () => {
+            const createRes = await request(app).put("/collections/agent-bob");
+            expect(createRes.status).toBe(204);
 
-            // Verify it exists
+            const listRes = await request(app).get("/collections");
+            expect(listRes.status).toBe(200);
+            expect(listRes.body.collections).toContain("agent-bob");
+        });
+
+        it("deletes a collection", async () => {
+            await request(app).put("/collections/to-delete");
+
             let listRes = await request(app).get("/collections");
             expect(listRes.body.collections).toContain("to-delete");
 
-            // Delete it
             const deleteRes = await request(app).delete("/collections/to-delete");
             expect(deleteRes.status).toBe(204);
 
-            // Verify it's gone
             listRes = await request(app).get("/collections");
             expect(listRes.body.collections).not.toContain("to-delete");
         });

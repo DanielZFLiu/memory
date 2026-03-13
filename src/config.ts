@@ -7,7 +7,6 @@ export const DEFAULT_MEMORY_CONFIG: Required<MemoryConfig> = {
     generationModel: "gemma3:latest",
     collectionName: "pieces",
     requestLogging: "off",
-    logRequests: false,
 };
 
 const ENV_CONFIG_KEYS: Record<keyof Required<MemoryConfig>, string[]> = {
@@ -17,7 +16,6 @@ const ENV_CONFIG_KEYS: Record<keyof Required<MemoryConfig>, string[]> = {
     generationModel: ["MEMORY_GENERATION_MODEL", "GENERATION_MODEL"],
     collectionName: ["MEMORY_COLLECTION_NAME", "COLLECTION_NAME"],
     requestLogging: ["MEMORY_REQUEST_LOGGING", "REQUEST_LOGGING"],
-    logRequests: ["MEMORY_LOG_REQUESTS", "LOG_REQUESTS"],
 };
 
 function resolveEnvOverride(keys: string[]): string | undefined {
@@ -26,23 +24,6 @@ function resolveEnvOverride(keys: string[]): string | undefined {
         if (value) {
             return value;
         }
-    }
-
-    return undefined;
-}
-
-function resolveBooleanEnvOverride(keys: string[]): boolean | undefined {
-    const value = resolveEnvOverride(keys);
-    if (value === undefined) {
-        return undefined;
-    }
-
-    if (value.toLowerCase() === "true") {
-        return true;
-    }
-
-    if (value.toLowerCase() === "false") {
-        return false;
     }
 
     return undefined;
@@ -63,16 +44,10 @@ function resolveRequestLoggingEnvOverride(keys: string[]): RequestLoggingMode | 
 }
 
 export function resolveConfig(config: MemoryConfig = {}): Required<MemoryConfig> {
-    const explicitLegacyLogRequests = config.logRequests;
     const envRequestLogging = resolveRequestLoggingEnvOverride(ENV_CONFIG_KEYS.requestLogging);
-    const envLegacyLogRequests = resolveBooleanEnvOverride(ENV_CONFIG_KEYS.logRequests);
     const requestLogging =
         config.requestLogging ??
-        (explicitLegacyLogRequests !== undefined
-            ? (explicitLegacyLogRequests ? "metadata" : "off")
-            : undefined) ??
         envRequestLogging ??
-        (envLegacyLogRequests !== undefined ? (envLegacyLogRequests ? "metadata" : "off") : undefined) ??
         DEFAULT_MEMORY_CONFIG.requestLogging;
 
     return {
@@ -97,6 +72,5 @@ export function resolveConfig(config: MemoryConfig = {}): Required<MemoryConfig>
             resolveEnvOverride(ENV_CONFIG_KEYS.collectionName) ??
             DEFAULT_MEMORY_CONFIG.collectionName,
         requestLogging,
-        logRequests: requestLogging !== "off",
     };
 }

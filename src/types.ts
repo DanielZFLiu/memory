@@ -14,7 +14,6 @@ export interface MemoryConfig {
     generationModel?: string;
     collectionName?: string;
     requestLogging?: RequestLoggingMode;
-    logRequests?: boolean;
 }
 
 export interface QueryOptions {

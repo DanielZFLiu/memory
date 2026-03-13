@@ -960,6 +960,14 @@ describe("PieceStore", () => {
             ).rejects.toThrow("PieceStore not initialized. Call init() first.");
         });
 
+        it("throws when calling createCollection before init", async () => {
+            const uninitializedStore = new PieceStore();
+
+            await expect(
+                uninitializedStore.createCollection("test"),
+            ).rejects.toThrow("PieceStore not initialized. Call init() first.");
+        });
+
         it("throws when calling deleteCollection before init", async () => {
             const uninitializedStore = new PieceStore();
 
@@ -1118,6 +1126,43 @@ describe("PieceStore", () => {
             mockListCollections.mockRejectedValueOnce(new Error("DB error"));
 
             await expect(store.listCollections()).rejects.toThrow("DB error");
+        });
+    });
+
+    describe("createCollection", () => {
+        it("creates the collection in ChromaDB", async () => {
+            await store.createCollection("agent-alice");
+
+            expect(mockGetOrCreateCollection).toHaveBeenCalledWith({
+                name: "agent-alice",
+                metadata: { "hnsw:space": "cosine" },
+            });
+        });
+
+        it("caches the created collection for later use", async () => {
+            const altCollection = {
+                add: vi.fn().mockResolvedValue(undefined),
+                get: vi.fn(),
+                delete: vi.fn(),
+                update: vi.fn(),
+                query: vi.fn(),
+            };
+            mockGetOrCreateCollection.mockResolvedValueOnce(altCollection);
+
+            await store.createCollection("agent-alice");
+            await store.addPiece("Hello", [], undefined, "agent-alice");
+
+            const aliceCalls = mockGetOrCreateCollection.mock.calls.filter(
+                (call: unknown[]) => (call[0] as { name: string }).name === "agent-alice",
+            );
+            expect(aliceCalls).toHaveLength(1);
+            expect(altCollection.add).toHaveBeenCalledTimes(1);
+        });
+
+        it("propagates ChromaDB errors", async () => {
+            mockGetOrCreateCollection.mockRejectedValueOnce(new Error("Create failed"));
+
+            await expect(store.createCollection("agent-alice")).rejects.toThrow("Create failed");
         });
     });
 

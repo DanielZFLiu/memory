@@ -10,7 +10,6 @@ All `MemoryConfig` fields are optional. Defaults are applied automatically.
 | `generationModel` | `gemma3:latest` | Ollama model for RAG generation |
 | `collectionName` | `pieces` | Default ChromaDB collection name |
 | `requestLogging` | `off` | REST request logging mode: `off`, `metadata`, or `body` |
-| `logRequests` | `false` | Legacy alias for request logging; `true` maps to `metadata`, `false` maps to `off` |
 
 `generationModel` is used by `createServer` and `MemoryMcpServer`. When constructing `RagPipeline` directly, pass the model name to its constructor.
 
@@ -30,11 +29,8 @@ Runtime configuration can be overridden with either `MEMORY_*` or non-prefixed e
 | `generationModel` | `MEMORY_GENERATION_MODEL`, `GENERATION_MODEL` |
 | `collectionName` | `MEMORY_COLLECTION_NAME`, `COLLECTION_NAME` |
 | `requestLogging` | `MEMORY_REQUEST_LOGGING`, `REQUEST_LOGGING` |
-| `logRequests` | `MEMORY_LOG_REQUESTS`, `LOG_REQUESTS` |
 
 For `requestLogging`, supported values are `off`, `metadata`, and `body`.
-
-For the legacy `logRequests` alias, only `true` and `false` are recognized.
 
 ## Example
 

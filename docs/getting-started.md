@@ -68,7 +68,7 @@ npm run db:port -- 8001  # start ChromaDB on a custom port
 - [npm Package](./npm-package.md)
 - [REST API](./rest-api.md)
 
-If you want to see incoming REST API requests during local development, set `MEMORY_REQUEST_LOGGING=metadata` or `REQUEST_LOGGING=metadata` before starting the HTTP server. To log JSON request bodies as well, use `body` instead of `metadata`. The legacy `MEMORY_LOG_REQUESTS=true` and `LOG_REQUESTS=true` aliases still work and map to metadata logging.
+If you want to see incoming REST API requests during local development, set `MEMORY_REQUEST_LOGGING=metadata` or `REQUEST_LOGGING=metadata` before starting the HTTP server. To log JSON request bodies as well, use `body` instead of `metadata`.
 
 ## Configuration
 

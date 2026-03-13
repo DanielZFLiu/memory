@@ -413,6 +413,27 @@ Example:
 curl http://localhost:3000/collections
 ```
 
+### `PUT /collections/:name`
+
+Ensure a collection exists.
+
+This endpoint is idempotent and returns success whether the collection is newly created or already present.
+
+Responses:
+
+| Status | Body |
+|--------|------|
+| `204` | No body |
+| `400` | `ErrorResponse` |
+| `500` | `ErrorResponse` |
+| `503` | `ServiceUnavailableResponse` |
+
+Example:
+
+```bash
+curl -X PUT http://localhost:3000/collections/agent-alice
+```
+
 ### `DELETE /collections/:name`
 
 Delete a collection by name.

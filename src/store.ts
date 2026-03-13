@@ -142,6 +142,18 @@ export class PieceStore {
         return this.chromaClient.listCollections();
     }
 
+    async createCollection(name: string): Promise<void> {
+        if (!this.initialized) {
+            throw new Error("PieceStore not initialized. Call init() first.");
+        }
+
+        const collection = await this.chromaClient.getOrCreateCollection({
+            name,
+            metadata: { "hnsw:space": "cosine" },
+        });
+        this.collectionCache.set(name, collection);
+    }
+
     async deleteCollection(name: string): Promise<void> {
         if (!this.initialized) {
             throw new Error("PieceStore not initialized. Call init() first.");

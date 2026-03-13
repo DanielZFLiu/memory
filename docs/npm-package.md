@@ -74,6 +74,10 @@ const app = createServer({
 app.listen(4000, () => console.log("Running on :4000"));
 ```
 
+`createServer` exposes the full REST surface.
+
+If you are building your own app or dashboard directly on the library, `PieceStore` also exposes lower-level collection and listing helpers such as `createCollection`, `listCollections`, `listPieces`, and `listTags`.
+
 ## Public exports
 
 | Export | Description |
@@ -85,6 +89,7 @@ app.listen(4000, () => console.log("Running on :4000"));
 | `createServer` | Express app factory with REST endpoints pre-configured |
 | `MemoryConfig` | Configuration interface |
 | `DEFAULT_MEMORY_CONFIG` | Default resolved configuration values |
+| `RequestLoggingMode` | REST request logging mode: `off`, `metadata`, or `body` |
 | `Piece` | `{ id, content, title?, tags }` |
 | `QueryOptions` | `{ tags?, topK?, useHybridSearch? }` |
 | `QueryResult` | `{ piece, score }` |

@@ -55,6 +55,8 @@ If you are running from a local clone instead:
 
 All piece-level tools accept an optional `collection` parameter to target a specific collection instead of the default collection.
 
+There is no separate `create_collection` MCP tool. Collections are created implicitly the first time an agent writes to a new collection.
+
 ## Configuration
 
 The MCP server uses the same runtime configuration as the library and REST API. See [Configuration](./configuration.md).

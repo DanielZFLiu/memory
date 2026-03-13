@@ -234,6 +234,21 @@ export function createServer(config: MemoryConfig = {}) {
         next();
     });
 
+    app.put("/collections/:name", async (req: Request<{ name: string }>, res: Response) => {
+        try {
+            const name = req.params.name.trim();
+            if (!name) {
+                res.status(400).json({ error: "collection name must be a non-empty string" });
+                return;
+            }
+
+            await store.createCollection(name);
+            res.status(204).send();
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
     // GET /collections — List all collections
     app.get("/collections", async (_req: Request, res: Response) => {
         try {
