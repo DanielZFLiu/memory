@@ -5,12 +5,16 @@ export interface Piece {
     tags: string[];
 }
 
+export type RequestLoggingMode = "off" | "metadata" | "body";
+
 export interface MemoryConfig {
     chromaUrl?: string;
     ollamaUrl?: string;
     embeddingModel?: string;
     generationModel?: string;
     collectionName?: string;
+    requestLogging?: RequestLoggingMode;
+    logRequests?: boolean;
 }
 
 export interface QueryOptions {

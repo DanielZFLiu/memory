@@ -59,6 +59,21 @@ function parseTitle(metadata: Record<string, unknown> | null | undefined): strin
     return normalizeTitle(metadata?.title);
 }
 
+function toPiece(
+    id: string,
+    content: string | null | undefined,
+    metadata: Record<string, unknown> | null | undefined,
+): Piece {
+    const title = parseTitle(metadata);
+
+    return {
+        id,
+        content: content ?? "",
+        ...(title !== undefined ? { title } : {}),
+        tags: parseTags(metadata),
+    };
+}
+
 function toEmbeddingText(content: string, title?: string): string {
     return title ? `${title}\n\n${content}` : content;
 }
@@ -166,14 +181,39 @@ export class PieceStore {
 
         if (!result.ids.length) return null;
 
-        const title = parseTitle(result.metadatas[0]);
+        return toPiece(result.ids[0], result.documents[0], result.metadatas[0]);
+    }
 
-        return {
-            id: result.ids[0],
-            content: result.documents[0] ?? "",
-            ...(title !== undefined ? { title } : {}),
-            tags: parseTags(result.metadatas[0]),
-        };
+    async listPieces(
+        options: { limit?: number; offset?: number } = {},
+        collection?: string,
+    ): Promise<Piece[]> {
+        const col = await this.resolveCollection(collection);
+        const result = await col.get({
+            ...(options.limit !== undefined ? { limit: options.limit } : {}),
+            ...(options.offset !== undefined ? { offset: options.offset } : {}),
+            include: [IncludeEnum.Documents, IncludeEnum.Metadatas],
+        } as Parameters<Collection["get"]>[0]);
+
+        return result.ids.map((id, index) =>
+            toPiece(id, result.documents[index], result.metadatas[index]),
+        );
+    }
+
+    async listTags(collection?: string): Promise<string[]> {
+        const col = await this.resolveCollection(collection);
+        const result = await col.get({
+            include: [IncludeEnum.Metadatas],
+        } as Parameters<Collection["get"]>[0]);
+
+        const tags = new Set<string>();
+        for (const metadata of result.metadatas) {
+            for (const tag of parseTags(metadata)) {
+                tags.add(tag);
+            }
+        }
+
+        return Array.from(tags).sort((left, right) => left.localeCompare(right));
     }
 
     async deletePiece(id: string, collection?: string): Promise<void> {
@@ -260,14 +300,8 @@ export class PieceStore {
 
         const queryResults: QueryResult[] = [];
         for (let i = 0; i < ids.length; i++) {
-            const title = parseTitle(metadatas[i]);
             queryResults.push({
-                piece: {
-                    id: ids[i],
-                    content: documents[i] ?? "",
-                    ...(title !== undefined ? { title } : {}),
-                    tags: parseTags(metadatas[i]),
-                },
+                piece: toPiece(ids[i], documents[i], metadatas[i]),
                 score: 1 - (distances[i] ?? 0), // cosine distance → similarity
             });
         }

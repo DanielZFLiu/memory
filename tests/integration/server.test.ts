@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import http from "http";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import {
     createInMemoryCollection,
@@ -83,6 +84,42 @@ async function seedSearchData(app: ReturnType<typeof createServer>) {
     }
 }
 
+async function withJsonServer(
+    statusCode: number,
+    body: unknown,
+    run: (baseUrl: string) => Promise<void>,
+) {
+    const server = http.createServer((_req, res) => {
+        res.statusCode = statusCode;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(body));
+    });
+
+    await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+        throw new Error("Failed to determine test server address");
+    }
+
+    try {
+        await run(`http://127.0.0.1:${address.port}`);
+    } finally {
+        await new Promise<void>((resolve, reject) => {
+            server.close((err) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+
+                resolve();
+            });
+        });
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests — exercise the full HTTP → server → store → rag stack
 // ---------------------------------------------------------------------------
@@ -110,6 +147,10 @@ describe("Integration: Full API Stack", () => {
         app = createServer({
             collectionName: "integration-test",
         });
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 
     // -------------------------------------------------------------------
@@ -204,6 +245,31 @@ describe("Integration: Full API Stack", () => {
                 expect(res.body.content).toBe(pieces[i].content);
                 expect(res.body.tags).toEqual(pieces[i].tags);
             }
+        });
+
+        it("lists pieces with optional pagination", async () => {
+            await request(app).post("/pieces").send({ content: "Piece A", tags: ["a"] });
+            await request(app).post("/pieces").send({ content: "Piece B", tags: ["b"] });
+            await request(app).post("/pieces").send({ content: "Piece C", tags: ["c"] });
+
+            const res = await request(app).get("/pieces?limit=2&offset=1");
+
+            expect(res.status).toBe(200);
+            expect(res.body.pieces).toHaveLength(2);
+            expect(res.body.pieces.map((piece: { content: string }) => piece.content)).toEqual([
+                "Piece B",
+                "Piece C",
+            ]);
+        });
+
+        it("lists tags as a unique sorted set", async () => {
+            await request(app).post("/pieces").send({ content: "Piece A", tags: ["beta", "alpha"] });
+            await request(app).post("/pieces").send({ content: "Piece B", tags: ["beta", "gamma"] });
+
+            const res = await request(app).get("/tags");
+
+            expect(res.status).toBe(200);
+            expect(res.body.tags).toEqual(["alpha", "beta", "gamma"]);
         });
     });
 
@@ -484,6 +550,21 @@ describe("Integration: Full API Stack", () => {
     // -------------------------------------------------------------------
 
     describe("input validation", () => {
+        it("rejects GET /pieces with invalid limit", async () => {
+            const res = await request(app).get("/pieces?limit=0");
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects GET /pieces with invalid offset", async () => {
+            const res = await request(app).get("/pieces?offset=-1");
+            expect(res.status).toBe(400);
+        });
+
+        it("rejects GET /tags with invalid limit", async () => {
+            const res = await request(app).get("/tags?limit=0");
+            expect(res.status).toBe(400);
+        });
+
         it("rejects POST /pieces with missing content", async () => {
             const res = await request(app).post("/pieces").send({});
             expect(res.status).toBe(400);
@@ -730,6 +811,96 @@ describe("Integration: Full API Stack", () => {
         });
     });
 
+    describe("health endpoint", () => {
+        it("reports healthy api, chromadb, and ollama services", async () => {
+            await withJsonServer(200, { models: [{ name: "gemma3:latest" }] }, async (ollamaUrl) => {
+                const healthApp = createServer({
+                    collectionName: "integration-test",
+                    ollamaUrl,
+                });
+
+                const res = await request(healthApp).get("/health");
+
+                expect(res.status).toBe(200);
+                expect(res.body.status).toBe("ok");
+                expect(res.body.services.api.status).toBe("ok");
+                expect(res.body.services.chromadb.status).toBe("ok");
+                expect(res.body.services.ollama.status).toBe("ok");
+                expect(res.body.services.ollama.modelCount).toBe(1);
+            });
+        });
+
+        it("reports degraded status when ollama is unhealthy", async () => {
+            await withJsonServer(500, { error: "boom" }, async (ollamaUrl) => {
+                const healthApp = createServer({
+                    collectionName: "integration-test",
+                    ollamaUrl,
+                });
+
+                const res = await request(healthApp).get("/health");
+
+                expect(res.status).toBe(503);
+                expect(res.body.status).toBe("degraded");
+                expect(res.body.services.api.status).toBe("ok");
+                expect(res.body.services.chromadb.status).toBe("ok");
+                expect(res.body.services.ollama.status).toBe("error");
+            });
+        });
+    });
+
+    describe("request logging", () => {
+        it("logs request metadata when metadata logging is enabled", async () => {
+            const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+            const loggingApp = createServer({
+                collectionName: "integration-test",
+                requestLogging: "metadata",
+            });
+
+            const res = await request(loggingApp)
+                .post("/query")
+                .send({ query: "sensitive query text", collection: "agent-alice" });
+
+            expect(res.status).toBe(200);
+            expect(logSpy).toHaveBeenCalledTimes(1);
+
+            const [logLine] = logSpy.mock.calls[0] as [string];
+            expect(logLine).toMatch(/^POST \/query 200 \d+\.\dms collection=agent-alice$/);
+            expect(logLine).not.toContain("sensitive query text");
+        });
+
+        it("logs request bodies only when body logging is enabled", async () => {
+            const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+            const loggingApp = createServer({
+                collectionName: "integration-test",
+                requestLogging: "body",
+            });
+
+            const res = await request(loggingApp)
+                .post("/query")
+                .send({ query: "sensitive query text", collection: "agent-alice" });
+
+            expect(res.status).toBe(200);
+            expect(logSpy).toHaveBeenCalledTimes(1);
+
+            const [logLine] = logSpy.mock.calls[0] as [string];
+            expect(logLine).toContain("collection=agent-alice");
+            expect(logLine).toContain('body={"query":"sensitive query text","collection":"agent-alice"}');
+        });
+
+        it("does not log requests when disabled", async () => {
+            const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+            const quietApp = createServer({
+                collectionName: "integration-test",
+                requestLogging: "off",
+            });
+
+            const res = await request(quietApp).post("/query").send({ query: "test" });
+
+            expect(res.status).toBe(200);
+            expect(logSpy).not.toHaveBeenCalled();
+        });
+    });
+
     // -------------------------------------------------------------------
     // Multi-Collection
     // -------------------------------------------------------------------
@@ -795,6 +966,37 @@ describe("Integration: Full API Stack", () => {
             expect(bobResults.body.some((r: { piece: { content: string } }) =>
                 r.piece.content.includes("TypeScript"),
             )).toBe(false);
+        });
+
+        it("lists pieces within the specified collection only", async () => {
+            await request(app)
+                .post("/pieces")
+                .send({ content: "Default piece", tags: ["default"] });
+
+            await request(app)
+                .post("/pieces")
+                .send({ content: "Alice piece", tags: ["alice"], collection: "agent-alice" });
+
+            const res = await request(app).get("/pieces?collection=agent-alice");
+
+            expect(res.status).toBe(200);
+            expect(res.body.pieces).toHaveLength(1);
+            expect(res.body.pieces[0].content).toBe("Alice piece");
+        });
+
+        it("lists tags within the specified collection only", async () => {
+            await request(app)
+                .post("/pieces")
+                .send({ content: "Default piece", tags: ["default"] });
+
+            await request(app)
+                .post("/pieces")
+                .send({ content: "Alice piece", tags: ["alice", "shared"], collection: "agent-alice" });
+
+            const res = await request(app).get("/tags?collection=agent-alice");
+
+            expect(res.status).toBe(200);
+            expect(res.body.tags).toEqual(["alice", "shared"]);
         });
 
         it("lists all collections", async () => {

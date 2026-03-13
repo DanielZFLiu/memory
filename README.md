@@ -20,7 +20,7 @@ A fully local MCP server, Node.js library, and REST API for storing, semanticall
 |------|---------------|------|
 | MCP Server | Runs Memory over stdio for MCP-compatible clients | [MCP Server](./docs/mcp-server.md) |
 | npm Package | Lets you use `PieceStore`, `RagPipeline`, `createServer`, and related types directly | [npm Package](./docs/npm-package.md) |
-| REST API | Runs the standalone HTTP server with CRUD, semantic search, and RAG endpoints | [REST API](./docs/rest-api.md) |
+| REST API | Runs the standalone HTTP server with CRUD, listing, health, semantic search, and RAG endpoints | [REST API](./docs/rest-api.md) |
 
 ## Quick start
 

@@ -99,7 +99,109 @@ Example:
 }
 ```
 
+`HealthResponse`
+
+```json
+{
+  "status": "ok",
+  "services": {
+    "api": {
+      "status": "ok"
+    },
+    "chromadb": {
+      "status": "ok"
+    },
+    "ollama": {
+      "status": "ok",
+      "modelCount": 7
+    }
+  }
+}
+```
+
 > **Multi-collection:** All piece and query endpoints accept an optional `collection` parameter to target a specific collection. For `POST` and `PUT`, pass it in the JSON body. For `GET` and `DELETE`, pass it as a query parameter. Omitting it uses the default collection.
+
+### `GET /health`
+
+Report the health of the API, ChromaDB, and Ollama.
+
+Responses:
+
+| Status | Body |
+|--------|------|
+| `200` | `HealthResponse` with `status: "ok"` |
+| `503` | `HealthResponse` with `status: "degraded"` |
+
+Notes:
+
+| Field | Description |
+|------|-------------|
+| `services.api.status` | Always `ok` when the API process is responding |
+| `services.chromadb.status` | `ok` when ChromaDB is reachable |
+| `services.ollama.status` | `ok` when Ollama responds successfully to `/api/tags` |
+| `services.ollama.modelCount` | Present when the Ollama health check returns a model list |
+
+Example:
+
+```bash
+curl http://localhost:3000/health
+```
+
+### `GET /pieces`
+
+List pieces from a collection, optionally paginated.
+
+Query parameters:
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `collection` | `string` | No | Optional target collection |
+| `limit` | `number` | No | Positive integer maximum number of pieces to return |
+| `offset` | `number` | No | Non-negative integer number of pieces to skip |
+
+Responses:
+
+| Status | Body |
+|--------|------|
+| `200` | `{ "pieces": Piece[] }` |
+| `400` | `ErrorResponse` |
+| `500` | `ErrorResponse` |
+| `503` | `ServiceUnavailableResponse` |
+
+Example:
+
+```bash
+curl http://localhost:3000/pieces
+curl "http://localhost:3000/pieces?collection=agent-alice&limit=20&offset=40"
+```
+
+### `GET /tags`
+
+List unique tags from a collection in sorted order.
+
+Query parameters:
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `collection` | `string` | No | Optional target collection |
+| `limit` | `number` | No | Positive integer maximum number of tags to return |
+| `offset` | `number` | No | Non-negative integer number of tags to skip |
+
+Responses:
+
+| Status | Body |
+|--------|------|
+| `200` | `{ "tags": string[] }` |
+| `400` | `ErrorResponse` |
+| `500` | `ErrorResponse` |
+| `503` | `ServiceUnavailableResponse` |
+
+Example:
+
+```bash
+curl http://localhost:3000/tags
+curl "http://localhost:3000/tags?collection=agent-alice&limit=25&offset=0"
+```
 
 ### `POST /pieces`
 

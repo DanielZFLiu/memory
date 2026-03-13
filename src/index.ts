@@ -6,6 +6,7 @@ export { createServer } from "./server";
 export {
     Piece,
     MemoryConfig,
+    RequestLoggingMode,
     QueryOptions,
     QueryResult,
     RagResult,

@@ -50,8 +50,18 @@ export function createInMemoryCollection() {
             }
         }),
 
-        get: vi.fn(async (params: { ids: string[]; include?: string[] }) => {
-            const found = docs.filter((d) => params.ids.includes(d.id));
+        get: vi.fn(async (params: {
+            ids?: string[];
+            limit?: number;
+            offset?: number;
+            include?: string[];
+        }) => {
+            const matching = params.ids
+                ? docs.filter((d) => params.ids!.includes(d.id))
+                : [...docs];
+            const start = params.offset ?? 0;
+            const end = params.limit !== undefined ? start + params.limit : undefined;
+            const found = matching.slice(start, end);
             return {
                 ids: found.map((d) => d.id),
                 documents: found.map((d) => d.document),

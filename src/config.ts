@@ -1,4 +1,4 @@
-import { MemoryConfig } from "./types";
+import { MemoryConfig, RequestLoggingMode } from "./types";
 
 export const DEFAULT_MEMORY_CONFIG: Required<MemoryConfig> = {
     chromaUrl: "http://localhost:8000",
@@ -6,6 +6,8 @@ export const DEFAULT_MEMORY_CONFIG: Required<MemoryConfig> = {
     embeddingModel: "nomic-embed-text-v2-moe:latest",
     generationModel: "gemma3:latest",
     collectionName: "pieces",
+    requestLogging: "off",
+    logRequests: false,
 };
 
 const ENV_CONFIG_KEYS: Record<keyof Required<MemoryConfig>, string[]> = {
@@ -14,6 +16,8 @@ const ENV_CONFIG_KEYS: Record<keyof Required<MemoryConfig>, string[]> = {
     embeddingModel: ["MEMORY_EMBEDDING_MODEL", "EMBEDDING_MODEL"],
     generationModel: ["MEMORY_GENERATION_MODEL", "GENERATION_MODEL"],
     collectionName: ["MEMORY_COLLECTION_NAME", "COLLECTION_NAME"],
+    requestLogging: ["MEMORY_REQUEST_LOGGING", "REQUEST_LOGGING"],
+    logRequests: ["MEMORY_LOG_REQUESTS", "LOG_REQUESTS"],
 };
 
 function resolveEnvOverride(keys: string[]): string | undefined {
@@ -27,7 +31,50 @@ function resolveEnvOverride(keys: string[]): string | undefined {
     return undefined;
 }
 
+function resolveBooleanEnvOverride(keys: string[]): boolean | undefined {
+    const value = resolveEnvOverride(keys);
+    if (value === undefined) {
+        return undefined;
+    }
+
+    if (value.toLowerCase() === "true") {
+        return true;
+    }
+
+    if (value.toLowerCase() === "false") {
+        return false;
+    }
+
+    return undefined;
+}
+
+function resolveRequestLoggingEnvOverride(keys: string[]): RequestLoggingMode | undefined {
+    const value = resolveEnvOverride(keys);
+    if (value === undefined) {
+        return undefined;
+    }
+
+    const normalized = value.toLowerCase();
+    if (normalized === "off" || normalized === "metadata" || normalized === "body") {
+        return normalized;
+    }
+
+    return undefined;
+}
+
 export function resolveConfig(config: MemoryConfig = {}): Required<MemoryConfig> {
+    const explicitLegacyLogRequests = config.logRequests;
+    const envRequestLogging = resolveRequestLoggingEnvOverride(ENV_CONFIG_KEYS.requestLogging);
+    const envLegacyLogRequests = resolveBooleanEnvOverride(ENV_CONFIG_KEYS.logRequests);
+    const requestLogging =
+        config.requestLogging ??
+        (explicitLegacyLogRequests !== undefined
+            ? (explicitLegacyLogRequests ? "metadata" : "off")
+            : undefined) ??
+        envRequestLogging ??
+        (envLegacyLogRequests !== undefined ? (envLegacyLogRequests ? "metadata" : "off") : undefined) ??
+        DEFAULT_MEMORY_CONFIG.requestLogging;
+
     return {
         chromaUrl:
             config.chromaUrl ??
@@ -49,5 +96,7 @@ export function resolveConfig(config: MemoryConfig = {}): Required<MemoryConfig>
             config.collectionName ??
             resolveEnvOverride(ENV_CONFIG_KEYS.collectionName) ??
             DEFAULT_MEMORY_CONFIG.collectionName,
+        requestLogging,
+        logRequests: requestLogging !== "off",
     };
 }
